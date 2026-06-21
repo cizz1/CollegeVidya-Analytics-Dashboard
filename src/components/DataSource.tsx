@@ -1,8 +1,8 @@
 import React from "react";
 
 export default function DataSource({ sheetUrl }: { sheetUrl: string }) {
-  // Convert the sheet URL to the embeddable format
-  const embedUrl = sheetUrl.replace("/edit?usp=sharing", "/htmlview?widget=true&headers=false");
+  // Use the direct URL to allow normal Google Sheets interaction
+  const embedUrl = sheetUrl;
 
   return (
     <div className="w-full h-full p-4">

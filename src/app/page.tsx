@@ -6,7 +6,7 @@ import Dashboard from "@/components/Dashboard";
 import DataSource from "@/components/DataSource";
 import { fetchDashboardData, DashboardData } from "@/utils/fetchData";
 
-const GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1GndePQenAPHRSc9v6-ptX-ZONxNi8qFEAulav_3bxvQ/edit?usp=sharing";
+const GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/15-dd5pJ72ZxcNkgaCaqOlMVGWUIabYFwdpl_vIrzKG4/edit?usp=sharing";
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<"dashboard" | "data">("dashboard");
@@ -27,10 +27,11 @@ export default function Home() {
     <main className="flex flex-col h-screen w-screen bg-background text-foreground overflow-hidden">
       {/* Header */}
       <header className="flex items-center justify-between px-6 py-4 border-b border-card-border shrink-0">
-        <div className="flex items-center gap-4">
-          <Image src="/monade-logo.avif" alt="Monade AI" width={40} height={40} className="rounded-md object-contain" />
-          <span className="text-xl font-bold tracking-wider text-monade">x</span>
-          <Image src="/collegevidya-logo.png" alt="College Vidya" width={140} height={40} className="object-contain filter grayscale brightness-200" />
+        <div className="flex items-center gap-2 h-10">
+          <div className="h-full w-24 overflow-hidden rounded-md flex items-center justify-center -ml-3">
+            <Image src="/monade-logo.avif" alt="Monade AI" width={0} height={0} sizes="100vw" style={{ width: 'auto', height: '100%' }} className="object-contain scale-[1.8]" />
+          </div>
+          <Image src="/collegevidya-logo.png" alt="College Vidya" width={0} height={0} sizes="100vw" style={{ width: 'auto', height: '100%' }} className="object-contain filter grayscale brightness-200" />
         </div>
         <div className="flex items-center bg-card-bg rounded-lg p-1 border border-card-border">
           <button
