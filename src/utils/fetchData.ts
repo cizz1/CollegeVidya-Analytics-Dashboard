@@ -1,6 +1,93 @@
-import Papa from 'papaparse';
+export type DashboardPage = "overview" | "trends" | "timing" | "qualification" | "operations";
+
+export type DatePreset = "today" | "yesterday" | "tomorrow" | "7d" | "30d" | "month" | "custom";
+
+export interface DashboardFilters {
+  preset: DatePreset;
+  timezone: string;
+  startDate: string;
+  endDate: string;
+  startTime: string;
+  endTime: string;
+}
+
+export interface MetricPoint {
+  name: string;
+  value: number;
+}
+
+export interface DailyPoint {
+  name: string;
+  totalCalls: number;
+  connected: number;
+  didNotConnect: number;
+  qualified: number;
+  uncertain: number;
+  notInterested: number;
+  connectivityRate: number;
+  qualificationRate: number;
+  avgTalkTimeSeconds: number | null;
+  creditsSpent: number;
+}
+
+export interface HourlyPoint {
+  hour: number;
+  label: string;
+  totalCalls: number;
+  connected: number;
+  didNotConnect: number;
+  qualified: number;
+  uncertain: number;
+  notInterested: number;
+  connectivityRate: number;
+  qualificationRate: number;
+  avgTalkTimeSeconds: number | null;
+}
 
 export interface DashboardData {
+  meta: {
+    generatedAt: string;
+    timezone: string;
+    requestedRange: {
+      startLocal: string;
+      endLocal: string;
+      startUtc: string;
+      endUtc: string;
+    };
+    globalPeriodStart: string | null;
+    globalPeriodEnd: string | null;
+    filteredPeriodStart: string | null;
+    filteredPeriodEnd: string | null;
+    backendSource: string;
+  };
+  kpis: {
+    totalLeadsReceived: number;
+    totalLeadsAttempted: number;
+    totalCalls: number;
+    connectedCalls: number;
+    didNotConnectCalls: number;
+    notInterestedCalls: number;
+    qualifiedLeads: number;
+    uncertainLeads: number;
+    callbackLeads: number;
+    connectivityRate: number;
+    qualificationRate: number;
+    uncertainRate: number;
+    notInterestedRate: number;
+    avgTalkTimeSeconds: number | null;
+    creditsSpent: number;
+    avgQualifiedScore: number;
+  };
+  comparisons: {
+    previousTotalCalls: number;
+    previousConnectedCalls: number;
+    previousQualifiedLeads: number;
+    previousConnectivityRate: number;
+    previousQualificationRate: number;
+    totalCallsDeltaPct: number | null;
+    connectedDeltaPct: number | null;
+    qualifiedDeltaPct: number | null;
+  };
   funnel: {
     totalCalls: number;
     connected: number;
@@ -9,238 +96,118 @@ export interface DashboardData {
     uncertain: number;
     qualified: number;
   };
-  notInterestedReasons: { name: string; value: number }[];
-  uncertainReasons: { name: string; value: number }[];
-  avgQualifiedScore: number;
-  
-  agentIntelligenceComprehensive: { name: string; value: number }[];
-  agentIntelligencePerCall: { name: string; value: number }[];
-  
-  callVolume: {
-    name: string;
-    qualified: number;
-    uncertain: number;
-    notInterested: number;
-    didNotConnect: number;
-    totalCalls: number;
-    connected: number;
-  }[];
-  
-  objectionRecovery: { name: string; value: number }[];
-  savedLeadsImpact: { name: string; value: number }[];
+  daily: DailyPoint[];
+  hourly: HourlyPoint[];
+  verdictDistribution: MetricPoint[];
+  callOutcomeDistribution: MetricPoint[];
+  notInterestedReasons: MetricPoint[];
+  uncertainReasons: MetricPoint[];
+  retryBuckets: MetricPoint[];
+  weeklyConnectivity: { name: string; connected: number; totalCalls: number; rate: number }[];
+  bestConnectivityHours: HourlyPoint[];
+  highestVolumeHours: HourlyPoint[];
+  agentTelemetry: MetricPoint[];
+  savedLeadsImpact: MetricPoint[];
 }
 
-const dummyData: DashboardData = {
-  funnel: {
-    totalCalls: 7963,
-    connected: 3937,
-    didNotConnect: 4026,
-    notInterested: 352,
-    uncertain: 3244,
-    qualified: 248,
+export const defaultFilters = (): DashboardFilters => ({
+  preset: "30d",
+  timezone: "Asia/Kolkata",
+  startDate: "",
+  endDate: "",
+  startTime: "00:00",
+  endTime: "23:59",
+});
+
+const emptyData: DashboardData = {
+  meta: {
+    generatedAt: new Date().toISOString(),
+    timezone: "Asia/Kolkata",
+    requestedRange: {
+      startLocal: "",
+      endLocal: "",
+      startUtc: "",
+      endUtc: "",
+    },
+    globalPeriodStart: null,
+    globalPeriodEnd: null,
+    filteredPeriodStart: null,
+    filteredPeriodEnd: null,
+    backendSource: "unavailable",
   },
-  notInterestedReasons: [
-    { name: "No Requirement", value: 197 },
-    { name: "Already has solution", value: 106 },
-    { name: "Other", value: 78 },
-    { name: "Budget/price", value: 5 }
-  ],
-  uncertainReasons: [
-    { name: "Disconnected on hearing reason", value: 2188 },
-    { name: "Voicemail", value: 697 },
-    { name: "Other", value: 427 },
-    { name: "Language barrier", value: 112 },
-    { name: "Asked to call later", value: 46 }
-  ],
-  avgQualifiedScore: 78,
-  
-  agentIntelligenceComprehensive: [
-    { name: "Number of questions answered correctly", value: 14250 },
-    { name: "Number of objections handled gracefully", value: 8430 },
-    { name: "Recovered successfully after user interrupted", value: 5120 },
-    { name: "Off-topic tangents recovered back to script", value: 3840 },
-    { name: "Empathetic listening responses used", value: 21500 },
-    { name: "Ineligible leads saved via alternative program suggestions", value: 1850 },
-    { name: "Language auto-switched to match user (Hindi/English)", value: 6240 },
-  ],
-  
-  agentIntelligencePerCall: [
-    { name: "Number of questions answered correctly", value: 2.8 },
-    { name: "Number of objections handled gracefully", value: 1.7 },
-    { name: "Recovered successfully after user interrupted", value: 1.0 },
-    { name: "Off-topic tangents recovered back to script", value: 0.8 },
-    { name: "Empathetic listening responses used", value: 4.3 },
-    { name: "Ineligible leads saved via alternative program suggestions", value: 0.4 },
-    { name: "Language auto-switched to match user (Hindi/English)", value: 1.2 },
-  ],
-  
-  callVolume: [
-    { name: "Day 1", totalCalls: 500, connected: 335, uncertain: 274, notInterested: 45, qualified: 16, didNotConnect: 165 },
-    { name: "Day 2", totalCalls: 1000, connected: 412, uncertain: 346, notInterested: 31, qualified: 35, didNotConnect: 588 },
-    { name: "Day 3", totalCalls: 525, connected: 280, uncertain: 265, notInterested: 13, qualified: 6, didNotConnect: 245 },
-    { name: "Day 4", totalCalls: 500, connected: 259, uncertain: 220, notInterested: 29, qualified: 10, didNotConnect: 241 },
-    { name: "Day 5", totalCalls: 580, connected: 341, uncertain: 298, notInterested: 20, qualified: 23, didNotConnect: 239 },
-    { name: "Day 6", totalCalls: 1000, connected: 501, uncertain: 397, notInterested: 43, qualified: 31, didNotConnect: 499 },
-    { name: "Day 7", totalCalls: 1500, connected: 674, uncertain: 516, notInterested: 56, qualified: 41, didNotConnect: 826 },
-    { name: "Day 8", totalCalls: 1259, connected: 611, uncertain: 495, notInterested: 63, qualified: 47, didNotConnect: 648 },
-    { name: "Day 9", totalCalls: 1099, connected: 524, uncertain: 433, notInterested: 52, qualified: 39, didNotConnect: 575 }
-  ],
-  
-  objectionRecovery: [
-    { name: "Fence-sitters (Undecided/Delaying)", value: 48 },
-    { name: "Too Expensive / Fee Concerns", value: 38 },
-    { name: "Comparing Other Options", value: 32 },
-    { name: "Trust / Legitimacy Concerns", value: 25 },
-    { name: "Skeptical of Online Degrees", value: 22 },
-  ],
-  
-  savedLeadsImpact: [
-    { name: "Smart Program Redirects (e.g. MBA to BBA)", value: 45 },
-    { name: "Financial Objection Handled (Scholarships/Loans)", value: 35 },
-    { name: "Fence-Sitter Recovered to Session", value: 28 },
-  ]
+  kpis: {
+    totalLeadsReceived: 0,
+    totalLeadsAttempted: 0,
+    totalCalls: 0,
+    connectedCalls: 0,
+    didNotConnectCalls: 0,
+    notInterestedCalls: 0,
+    qualifiedLeads: 0,
+    uncertainLeads: 0,
+    callbackLeads: 0,
+    connectivityRate: 0,
+    qualificationRate: 0,
+    uncertainRate: 0,
+    notInterestedRate: 0,
+    avgTalkTimeSeconds: null,
+    creditsSpent: 0,
+    avgQualifiedScore: 0,
+  },
+  comparisons: {
+    previousTotalCalls: 0,
+    previousConnectedCalls: 0,
+    previousQualifiedLeads: 0,
+    previousConnectivityRate: 0,
+    previousQualificationRate: 0,
+    totalCallsDeltaPct: null,
+    connectedDeltaPct: null,
+    qualifiedDeltaPct: null,
+  },
+  funnel: {
+    totalCalls: 0,
+    connected: 0,
+    didNotConnect: 0,
+    notInterested: 0,
+    uncertain: 0,
+    qualified: 0,
+  },
+  daily: [],
+  hourly: [],
+  verdictDistribution: [],
+  callOutcomeDistribution: [],
+  notInterestedReasons: [],
+  uncertainReasons: [],
+  retryBuckets: [],
+  weeklyConnectivity: [],
+  bestConnectivityHours: [],
+  highestVolumeHours: [],
+  agentTelemetry: [],
+  savedLeadsImpact: [],
 };
 
-export const fetchDashboardData = async (sheetUrl: string): Promise<DashboardData> => {
+export const fetchDashboardData = async (filters: DashboardFilters): Promise<DashboardData> => {
   try {
-    // Fetch directly from the local CSV generated by the processing script
-    const response = await fetch('/final_dashboard_data.csv');
-    if (!response.ok) {
-        console.warn("Could not load local final_dashboard_data.csv, using fallback");
-        return dummyData;
+    const params = new URLSearchParams();
+    params.set("preset", filters.preset);
+    params.set("timezone", filters.timezone);
+    params.set("startTime", filters.startTime);
+    params.set("endTime", filters.endTime);
+    if (filters.preset === "custom") {
+      params.set("startDate", filters.startDate);
+      params.set("endDate", filters.endDate);
     }
-    const csvText = await response.text();
 
-    return new Promise((resolve) => {
-      Papa.parse(csvText, {
-        header: true,
-        complete: (results) => {
-          const rows = results.data as any[];
-          if (rows.length === 0) {
-            resolve(dummyData);
-            return;
-          }
-
-          const safeBool = (val: any) => String(val).toLowerCase() === 'true';
-          const safeInt = (val: any) => parseInt(val) || 0;
-
-          const realData: DashboardData = {
-            funnel: {
-              totalCalls: rows.length,
-              connected: rows.filter(r => safeBool(r.call_connected)).length,
-              didNotConnect: rows.filter(r => !safeBool(r.call_connected)).length,
-              notInterested: rows.filter(r => safeBool(r.verdict_not_interested)).length,
-              uncertain: rows.filter(r => safeBool(r.verdict_uncertain)).length,
-              qualified: rows.filter(r => safeBool(r.verdict_qualified)).length,
-            },
-            notInterestedReasons: [
-              { name: "Already Enrolled Elsewhere", value: rows.filter(r => safeBool(r.ni_already_enrolled)).length },
-              { name: "Not Looking for Courses Currently", value: rows.filter(r => safeBool(r.ni_not_looking)).length },
-              { name: "Budget/Financial Constraints", value: rows.filter(r => safeBool(r.ni_budget_constraints)).length },
-              { name: "Preferred Another Institution", value: rows.filter(r => safeBool(r.ni_preferred_other)).length },
-              { name: "Wrong Contact / Not the Decision Maker", value: rows.filter(r => safeBool(r.ni_wrong_contact)).length },
-            ].sort((a, b) => b.value - a.value),
-            
-            uncertainReasons: [
-              { name: "Voicemail", value: rows.filter(r => safeBool(r.unc_voicemail)).length },
-              { name: "Disconnected on hearing the reason", value: rows.filter(r => safeBool(r.unc_disconnected_hearing_reason)).length },
-              { name: "Disconnected with minimal conversation", value: rows.filter(r => safeBool(r.unc_disconnected_minimal_conv)).length },
-              { name: "Disconnected due to language barrier", value: rows.filter(r => safeBool(r.unc_language_barrier)).length },
-              { name: "Disconnected in middle", value: rows.filter(r => safeBool(r.unc_disconnected_middle)).length },
-            ].sort((a, b) => b.value - a.value),
-            
-            avgQualifiedScore: (() => {
-              const qualifiedRows = rows.filter(r => safeBool(r.verdict_qualified));
-              if (qualifiedRows.length === 0) return 0;
-              return Math.round(
-                qualifiedRows.reduce((acc, r) => acc + safeInt(r.qualified_score), 0) / qualifiedRows.length
-              );
-            })(),
-            
-            agentIntelligenceComprehensive: [
-              { name: "Number of questions answered correctly", value: rows.reduce((acc, r) => acc + safeInt(r.ai_questions_answered_correctly), 0) },
-              { name: "Number of objections handled gracefully", value: rows.reduce((acc, r) => acc + safeInt(r.ai_objections_handled_gracefully), 0) },
-              { name: "Recovered successfully after user interrupted", value: rows.filter(r => safeBool(r.ai_recovered_after_interrupt)).length },
-              { name: "Off-topic tangents recovered back to script", value: rows.filter(r => safeBool(r.ai_off_topic_recovered)).length },
-              { name: "Empathetic listening responses used", value: rows.reduce((acc, r) => acc + safeInt(r.ai_empathetic_listening), 0) },
-              { name: "Ineligible leads saved via alternative program suggestions", value: rows.filter(r => safeBool(r.ai_ineligible_saved_alternative)).length },
-              { name: "Language auto-switched to match user (Hindi/English)", value: rows.filter(r => safeBool(r.ai_language_auto_switched)).length },
-            ],
-            
-            agentIntelligencePerCall: [
-              { name: "Number of questions answered correctly", value: parseFloat((rows.reduce((acc, r) => acc + safeInt(r.ai_questions_answered_correctly), 0) / (rows.length || 1)).toFixed(1)) },
-              { name: "Number of objections handled gracefully", value: parseFloat((rows.reduce((acc, r) => acc + safeInt(r.ai_objections_handled_gracefully), 0) / (rows.length || 1)).toFixed(1)) },
-              { name: "Recovered successfully after user interrupted", value: parseFloat((rows.filter(r => safeBool(r.ai_recovered_after_interrupt)).length / (rows.length || 1)).toFixed(1)) },
-              { name: "Off-topic tangents recovered back to script", value: parseFloat((rows.filter(r => safeBool(r.ai_off_topic_recovered)).length / (rows.length || 1)).toFixed(1)) },
-              { name: "Empathetic listening responses used", value: parseFloat((rows.reduce((acc, r) => acc + safeInt(r.ai_empathetic_listening), 0) / (rows.length || 1)).toFixed(1)) },
-              { name: "Ineligible leads saved via alternative program suggestions", value: parseFloat((rows.filter(r => safeBool(r.ai_ineligible_saved_alternative)).length / (rows.length || 1)).toFixed(1)) },
-              { name: "Language auto-switched to match user (Hindi/English)", value: parseFloat((rows.filter(r => safeBool(r.ai_language_auto_switched)).length / (rows.length || 1)).toFixed(1)) },
-            ],
-            
-            callVolume: [], // We will compute this next
-            
-            objectionRecovery: [
-              { name: "Fence-sitters (Undecided/Delaying)", value: rows.filter(r => safeBool(r.or_fence_sitter)).length },
-              { name: "Too Expensive / Fee Concerns", value: rows.filter(r => safeBool(r.or_too_expensive)).length },
-              { name: "Comparing Other Options", value: rows.filter(r => safeBool(r.or_comparing_options)).length },
-              { name: "Trust / Legitimacy Concerns", value: rows.filter(r => safeBool(r.or_trust_legitimacy)).length },
-              { name: "Skeptical of Online Degrees", value: rows.filter(r => safeBool(r.or_skeptical_online)).length },
-            ],
-            
-            savedLeadsImpact: [
-              { name: "Smart Program Redirects (e.g. MBA to BBA)", value: rows.filter(r => safeBool(r.sli_smart_program_redirect)).length },
-              { name: "Financial Objection Handled (Scholarships/Loans)", value: rows.filter(r => safeBool(r.sli_financial_objection_handled)).length },
-              { name: "Fence-Sitter Recovered to Session", value: rows.filter(r => safeBool(r.sli_fence_sitter_recovered)).length },
-            ]
-          };
-
-          // Override specific fields with ground truth data from campaign reports
-          realData.funnel = {
-            totalCalls: 9826,
-            connected: 4767,
-            didNotConnect: 5059,
-            notInterested: 445,
-            uncertain: 3903,
-            qualified: 326,
-          };
-
-          realData.uncertainReasons = [
-            { name: "Disconnected on hearing reason", value: 2646 },
-            { name: "Voicemail", value: 697 },
-            { name: "Other", value: 627 },
-            { name: "Language barrier", value: 126 },
-            { name: "Asked to call later", value: 46 }
-          ];
-
-          realData.notInterestedReasons = [
-            { name: "No Requirement", value: 248 },
-            { name: "Already has solution", value: 125 },
-            { name: "Other", value: 91 },
-            { name: "Budget/price", value: 5 }
-          ];
-
-          realData.callVolume = [
-            { name: "Day 1", totalCalls: 500, connected: 335, uncertain: 274, notInterested: 45, qualified: 16, didNotConnect: 165 },
-            { name: "Day 2", totalCalls: 1000, connected: 412, uncertain: 346, notInterested: 31, qualified: 35, didNotConnect: 588 },
-            { name: "Day 3", totalCalls: 525, connected: 280, uncertain: 265, notInterested: 13, qualified: 6, didNotConnect: 245 },
-            { name: "Day 4", totalCalls: 500, connected: 259, uncertain: 220, notInterested: 29, qualified: 10, didNotConnect: 241 },
-            { name: "Day 5", totalCalls: 580, connected: 341, uncertain: 298, notInterested: 20, qualified: 23, didNotConnect: 239 },
-            { name: "Day 6", totalCalls: 1000, connected: 501, uncertain: 397, notInterested: 43, qualified: 31, didNotConnect: 499 },
-            { name: "Day 7", totalCalls: 1500, connected: 674, uncertain: 516, notInterested: 56, qualified: 41, didNotConnect: 826 },
-            { name: "Day 8", totalCalls: 1259, connected: 611, uncertain: 495, notInterested: 63, qualified: 47, didNotConnect: 648 },
-            { name: "Day 9", totalCalls: 1099, connected: 524, uncertain: 433, notInterested: 52, qualified: 39, didNotConnect: 575 },
-            { name: "Day 10", totalCalls: 1863, connected: 830, uncertain: 659, notInterested: 93, qualified: 78, didNotConnect: 1033 }
-          ];
-
-          resolve(realData);
-        },
-        error: () => {
-          resolve(dummyData);
-        }
-      });
+    const response = await fetch(`/api/dashboard?${params.toString()}`, {
+      cache: "no-store",
     });
+
+    if (!response.ok) {
+      throw new Error(`Dashboard API failed with ${response.status}`);
+    }
+
+    return await response.json();
   } catch (err) {
-    console.error("Error fetching sheet data, using fallback", err);
-    return dummyData;
+    console.error("Error fetching live dashboard data", err);
+    return emptyData;
   }
 };

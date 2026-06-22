@@ -1,5 +1,30 @@
-import React, { useMemo } from "react";
+import React from "react";
 import { DashboardData } from "@/utils/fetchData";
+
+type FunnelNodeProps = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  label: string;
+  value: number;
+  color: string;
+  denominator: number;
+};
+
+function FunnelNode({ x, y, w, h, label, value, color, denominator }: FunnelNodeProps) {
+  return (
+    <g>
+      <rect x={x} y={y} width={w} height={h} fill={color} rx={4} />
+      <text x={x + w / 2} y={y + h / 2 - 6} fill="#fff" fontSize={11} fontWeight="bold" textAnchor="middle" dominantBaseline="middle">
+        {label}
+      </text>
+      <text x={x + w / 2} y={y + h / 2 + 8} fill="rgba(255,255,255,0.7)" fontSize={9} textAnchor="middle" dominantBaseline="middle">
+        {value.toLocaleString()} ({Math.round((value / (denominator || 1)) * 100)}%)
+      </text>
+    </g>
+  );
+}
 
 export default function FunnelChart({ data, avgScore, uncertainReasons = [] }: { data: DashboardData["funnel"], avgScore: number, uncertainReasons?: { name: string, value: number }[] }) {
   const { totalCalls, connected, didNotConnect, notInterested, qualified } = data;
@@ -81,19 +106,6 @@ export default function FunnelChart({ data, avgScore, uncertainReasons = [] }: {
     return `M ${sx} ${sy} C ${cx} ${sy}, ${cx} ${ey}, ${ex} ${ey} L ${ex} ${ey + eh} C ${cx} ${ey + eh}, ${cx} ${sy + sh}, ${sx} ${sy + sh} Z`;
   };
 
-  // Node component
-  const Node = ({ x, y, w, h, label, value, color, denominator = totalCalls }: any) => (
-    <g>
-      <rect x={x} y={y} width={w} height={h} fill={color} rx={4} />
-      <text x={x + w / 2} y={y + h / 2 - 6} fill="#fff" fontSize={11} fontWeight="bold" textAnchor="middle" dominantBaseline="middle">
-        {label}
-      </text>
-      <text x={x + w / 2} y={y + h / 2 + 8} fill="rgba(255,255,255,0.7)" fontSize={9} textAnchor="middle" dominantBaseline="middle">
-        {value.toLocaleString()} ({Math.round((value / (denominator || 1)) * 100)}%)
-      </text>
-    </g>
-  );
-
   return (
     <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto" preserveAspectRatio="xMidYMid meet">
       
@@ -109,18 +121,18 @@ export default function FunnelChart({ data, avgScore, uncertainReasons = [] }: {
       <path d={createPath(x2 + boxWidth, leftY2Qual, propQual, x3, y3Qual, hQual)} fill="#00d26a" opacity={0.2} />
 
       {/* Stage 1 */}
-      <Node x={x1} y={y1} w={boxWidth} h={hTotal} label="Total Calls" value={totalCalls} color="#FFC700" />
+      <FunnelNode x={x1} y={y1} w={boxWidth} h={hTotal} label="Total Calls" value={totalCalls} color="#FFC700" denominator={totalCalls} />
 
       {/* Stage 2 */}
-      <Node x={x2} y={y2Conn} w={boxWidth} h={hConnected} label="Connected" value={connected} color="#FFC700" />
-      <Node x={x2} y={y2Dnc} w={boxWidth} h={hDidNotConnect} label="Did Not Connect" value={didNotConnect} color="#333333" />
+      <FunnelNode x={x2} y={y2Conn} w={boxWidth} h={hConnected} label="Connected" value={connected} color="#FFC700" denominator={totalCalls} />
+      <FunnelNode x={x2} y={y2Dnc} w={boxWidth} h={hDidNotConnect} label="Did Not Connect" value={didNotConnect} color="#333333" denominator={totalCalls} />
 
       {/* Stage 3 */}
-      <Node x={x3} y={y3NI} w={boxWidth} h={hNI} label="Not Interested" value={notInterested} color="#ff3b3b" denominator={sumStage3} />
-      <Node x={x3} y={y3UncDisc} w={boxWidth} h={hUncDisc} label="Disconnected on hearing reason" value={uncDisconnected || uncertain * 0.6} color="#ff7700" denominator={sumStage3} />
-      <Node x={x3} y={y3UncVoice} w={boxWidth} h={hUncVoice} label="Voicemail" value={uncVoicemail || uncertain * 0.2} color="#ff9100" denominator={sumStage3} />
-      <Node x={x3} y={y3UncOther} w={boxWidth} h={hUncOther} label="Other Uncertain" value={uncOther || uncertain * 0.2} color="#ffaa00" denominator={sumStage3} />
-      <Node x={x3} y={y3Qual} w={boxWidth} h={hQual} label="Qualified" value={qualified} color="#00d26a" denominator={sumStage3} />
+      <FunnelNode x={x3} y={y3NI} w={boxWidth} h={hNI} label="Not Interested" value={notInterested} color="#ff3b3b" denominator={sumStage3} />
+      <FunnelNode x={x3} y={y3UncDisc} w={boxWidth} h={hUncDisc} label="Disconnected on hearing reason" value={uncDisconnected || uncertain * 0.6} color="#ff7700" denominator={sumStage3} />
+      <FunnelNode x={x3} y={y3UncVoice} w={boxWidth} h={hUncVoice} label="Voicemail" value={uncVoicemail || uncertain * 0.2} color="#ff9100" denominator={sumStage3} />
+      <FunnelNode x={x3} y={y3UncOther} w={boxWidth} h={hUncOther} label="Other Uncertain" value={uncOther || uncertain * 0.2} color="#ffaa00" denominator={sumStage3} />
+      <FunnelNode x={x3} y={y3Qual} w={boxWidth} h={hQual} label="Qualified" value={qualified} color="#00d26a" denominator={sumStage3} />
 
       {/* Avg Qualified Score Card */}
       <g transform={`translate(${x3}, ${y2Dnc + hDidNotConnect - 32})`}>

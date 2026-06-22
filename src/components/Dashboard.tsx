@@ -1,97 +1,445 @@
+"use client";
+
 import React from "react";
-import { DashboardData } from "@/utils/fetchData";
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ComposedChart,
+  Legend,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import { ArrowDownRight, ArrowUpRight, Minus, Sparkles } from "lucide-react";
+import { DashboardData, DashboardPage, HourlyPoint, MetricPoint } from "@/utils/fetchData";
 import FunnelChart from "./FunnelChart";
 import HorizontalBarChart from "./HorizontalBarChart";
-import StackedColumnChart from "./StackedColumnChart";
-import DailyConnectionRateChart from "./DailyConnectionRateChart";
-import DailyQualificationRateChart from "./DailyQualificationRateChart";
 
-const colorPalette = ["#ff7700", "#ff3b3b", "#FFC700", "#00d26a", "#a3a3a3", "#262626"];
+const palette = {
+  yellow: "#FFC700",
+  green: "#00d26a",
+  red: "#ff3b3b",
+  orange: "#ff7700",
+  cyan: "#38bdf8",
+  violet: "#a78bfa",
+  muted: "#a3a3a3",
+  grid: "#262626",
+};
 
-const callVolumeConfig = [
-  { key: "qualified", label: "Qualified", color: "#00d26a" },
-  { key: "uncertain", label: "Uncertain", color: "#ff7700" },
-  { key: "notInterested", label: "Not Interested", color: "#ff3b3b" },
-  { key: "didNotConnect", label: "Did Not Connect", color: "#a3a3a3" },
-];
+const pieColors = [palette.green, palette.orange, palette.red, palette.yellow, palette.cyan, palette.violet, palette.muted];
 
-export default function Dashboard({ data }: { data: DashboardData }) {
+const formatNumber = (value: number) => value.toLocaleString("en-IN");
+
+const formatPercent = (value: number) => `${value.toFixed(value % 1 === 0 ? 0 : 1)}%`;
+
+const formatDuration = (seconds: number | null) => {
+  if (seconds === null) return "No data";
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return minutes > 0 ? `${minutes}m ${String(remainingSeconds).padStart(2, "0")}s` : `${remainingSeconds}s`;
+};
+
+const formatDateTime = (value: string | null, timezone: string) => {
+  if (!value) return "No calls";
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: timezone,
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date(value));
+};
+
+const tooltipStyle = {
+  backgroundColor: "#101010",
+  border: "1px solid #262626",
+  borderRadius: 8,
+  color: "#ededed",
+};
+
+function DeltaBadge({ value }: { value: number | null }) {
+  if (value === null) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-muted">
+        <Minus size={12} />
+        no previous window
+      </span>
+    );
+  }
+
+  const positive = value >= 0;
+  const Icon = positive ? ArrowUpRight : ArrowDownRight;
   return (
-    <div className="flex flex-col h-full w-full p-4 gap-4 bg-background overflow-y-auto custom-scrollbar">
-      
-      {/* 1st Section: Funnel (Full Width) */}
-      <div className="shrink-0 relative bg-card-bg border border-card-border rounded-xl p-4 flex flex-col">
-        <h2 className="text-sm font-semibold text-muted uppercase tracking-wider mb-4 shrink-0">Call Funnel & Qualifications</h2>
-        <div className="w-full relative flex items-center justify-center">
-          <FunnelChart data={data.funnel} avgScore={data.avgQualifiedScore} uncertainReasons={data.uncertainReasons} />
+    <span className={`inline-flex items-center gap-1 text-xs ${positive ? "text-green" : "text-red"}`}>
+      <Icon size={12} />
+      {Math.abs(value).toFixed(1)}% vs previous
+    </span>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  detail,
+  delta,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  detail?: string;
+  delta?: number | null;
+  tone?: "default" | "green" | "orange" | "red" | "cyan";
+}) {
+  const toneClass = {
+    default: "text-foreground",
+    green: "text-green",
+    orange: "text-orange",
+    red: "text-red",
+    cyan: "text-[#38bdf8]",
+  }[tone];
+
+  return (
+    <div className="rounded-lg border border-card-border bg-card-bg p-4 min-h-[126px] flex flex-col justify-between">
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-muted">{label}</div>
+      <div>
+        <div className={`text-2xl font-semibold leading-none md:text-3xl ${toneClass}`}>{value}</div>
+        {detail ? <div className="mt-2 text-xs leading-snug text-muted">{detail}</div> : null}
+        {delta !== undefined ? <div className="mt-3"><DeltaBadge value={delta} /></div> : null}
+      </div>
+    </div>
+  );
+}
+
+function Panel({
+  title,
+  children,
+  className = "",
+  action,
+}: {
+  title: string;
+  children: React.ReactNode;
+  className?: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <section className={`rounded-lg border border-card-border bg-card-bg p-4 ${className}`}>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-monade">{title}</h2>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function EmptyState() {
+  return (
+    <div className="flex h-[260px] items-center justify-center rounded-lg border border-dashed border-card-border text-sm text-muted">
+      No calls in this selected window.
+    </div>
+  );
+}
+
+function PieBlock({ data }: { data: MetricPoint[] }) {
+  const hasData = data.some((item) => item.value > 0);
+  if (!hasData) return <EmptyState />;
+
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <PieChart>
+        <Pie data={data} dataKey="value" nameKey="name" innerRadius={68} outerRadius={102} paddingAngle={2}>
+          {data.map((_, index) => (
+            <Cell key={index} fill={pieColors[index % pieColors.length]} />
+          ))}
+        </Pie>
+        <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => formatNumber(value)} />
+        <Legend iconType="circle" wrapperStyle={{ color: palette.muted, fontSize: 12 }} />
+      </PieChart>
+    </ResponsiveContainer>
+  );
+}
+
+function TopHours({ rows, mode }: { rows: HourlyPoint[]; mode: "connectivity" | "volume" }) {
+  if (!rows.length) return <EmptyState />;
+
+  return (
+    <div className="space-y-3">
+      {rows.map((row, index) => (
+        <div key={row.hour} className="grid grid-cols-[44px_1fr_auto] items-center gap-3 rounded-lg bg-[#101010] px-3 py-3">
+          <div className="text-sm font-semibold text-muted">#{index + 1}</div>
+          <div>
+            <div className="text-sm font-semibold text-foreground">{row.label}</div>
+            <div className="mt-1 text-xs text-muted">
+              {formatNumber(row.totalCalls)} calls, {formatNumber(row.connected)} connected
+            </div>
+          </div>
+          <div className={mode === "connectivity" ? "text-green" : "text-monade"}>
+            <div className="text-lg font-semibold leading-none">
+              {mode === "connectivity" ? formatPercent(row.connectivityRate) : formatNumber(row.totalCalls)}
+            </div>
+            <div className="mt-1 text-right text-[11px] text-muted">
+              {mode === "connectivity" ? "connect" : "calls"}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Overview({ data }: { data: DashboardData }) {
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-6">
+        <MetricCard label="Leads Received" value={formatNumber(data.kpis.totalLeadsReceived)} detail="Campaign contacts in window" />
+        <MetricCard label="Leads Attempted" value={formatNumber(data.kpis.totalLeadsAttempted)} detail="Unique phone/contact dialed" />
+        <MetricCard label="Connected" value={formatNumber(data.kpis.connectedCalls)} detail={formatPercent(data.kpis.connectivityRate)} delta={data.comparisons.connectedDeltaPct} tone="green" />
+        <MetricCard label="Qualified" value={formatNumber(data.kpis.qualifiedLeads)} detail={`${formatPercent(data.kpis.qualificationRate)} of connected`} delta={data.comparisons.qualifiedDeltaPct} tone="green" />
+        <MetricCard label="Avg Talk Time" value={formatDuration(data.kpis.avgTalkTimeSeconds)} detail="Connected calls only" tone="cyan" />
+        <MetricCard label="Credits Spent" value={formatNumber(data.kpis.creditsSpent)} detail="Per-call billing rollup" tone="orange" />
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[1.35fr_0.65fr]">
+        <Panel title="Daily Momentum">
+          {data.daily.length ? (
+            <ResponsiveContainer width="100%" height={320}>
+              <AreaChart data={data.daily}>
+                <CartesianGrid stroke={palette.grid} vertical={false} />
+                <XAxis dataKey="name" stroke={palette.muted} tick={{ fontSize: 11 }} />
+                <YAxis stroke={palette.muted} tick={{ fontSize: 11 }} />
+                <Tooltip contentStyle={tooltipStyle} />
+                <Area type="monotone" dataKey="connected" name="Connected" stroke={palette.green} fill={palette.green} fillOpacity={0.18} />
+                <Area type="monotone" dataKey="qualified" name="Qualified" stroke={palette.yellow} fill={palette.yellow} fillOpacity={0.18} />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : <EmptyState />}
+        </Panel>
+
+        <Panel title="Call Outcomes">
+          <PieBlock data={data.callOutcomeDistribution} />
+        </Panel>
+      </div>
+
+      <Panel
+        title="Qualification Funnel"
+        action={<span className="text-xs text-muted">Avg qualified score {data.kpis.avgQualifiedScore}%</span>}
+      >
+        <div className="flex items-center justify-center">
+          <FunnelChart data={data.funnel} avgScore={data.kpis.avgQualifiedScore} uncertainReasons={data.uncertainReasons} />
+        </div>
+      </Panel>
+    </>
+  );
+}
+
+function Trends({ data }: { data: DashboardData }) {
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-5">
+        <MetricCard label="Total Calls" value={formatNumber(data.kpis.totalCalls)} detail={`${formatNumber(data.kpis.didNotConnectCalls)} did not connect`} delta={data.comparisons.totalCallsDeltaPct} />
+        <MetricCard label="Connectivity" value={formatPercent(data.kpis.connectivityRate)} detail="Connected over total calls" tone="green" />
+        <MetricCard label="Qualification Rate" value={formatPercent(data.kpis.qualificationRate)} detail="Qualified over connected" tone="green" />
+        <MetricCard label="Uncertain Rate" value={formatPercent(data.kpis.uncertainRate)} detail={`${formatNumber(data.kpis.uncertainLeads + data.kpis.callbackLeads)} leads`} tone="orange" />
+        <MetricCard label="Not Interested" value={formatPercent(data.kpis.notInterestedRate)} detail={`${formatNumber(data.kpis.notInterestedCalls)} calls`} tone="red" />
+      </div>
+
+      <Panel title="Rates By Day">
+        {data.daily.length ? (
+          <ResponsiveContainer width="100%" height={330}>
+            <LineChart data={data.daily}>
+              <CartesianGrid stroke={palette.grid} vertical={false} />
+              <XAxis dataKey="name" stroke={palette.muted} tick={{ fontSize: 11 }} />
+              <YAxis stroke={palette.muted} tick={{ fontSize: 11 }} domain={[0, 100]} tickFormatter={(value) => `${value}%`} />
+              <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => `${value}%`} />
+              <Legend wrapperStyle={{ color: palette.muted, fontSize: 12 }} />
+              <Line type="monotone" dataKey="connectivityRate" name="Connectivity" stroke={palette.green} strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="qualificationRate" name="Qualification" stroke={palette.yellow} strokeWidth={2} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        ) : <EmptyState />}
+      </Panel>
+
+      <Panel title="Call Mix By Day">
+        {data.daily.length ? (
+          <ResponsiveContainer width="100%" height={330}>
+            <BarChart data={data.daily}>
+              <CartesianGrid stroke={palette.grid} vertical={false} />
+              <XAxis dataKey="name" stroke={palette.muted} tick={{ fontSize: 11 }} />
+              <YAxis stroke={palette.muted} tick={{ fontSize: 11 }} />
+              <Tooltip contentStyle={tooltipStyle} />
+              <Legend wrapperStyle={{ color: palette.muted, fontSize: 12 }} />
+              <Bar dataKey="qualified" name="Qualified" stackId="a" fill={palette.green} />
+              <Bar dataKey="uncertain" name="Uncertain" stackId="a" fill={palette.orange} />
+              <Bar dataKey="notInterested" name="Not Interested" stackId="a" fill={palette.red} />
+              <Bar dataKey="didNotConnect" name="Did Not Connect" stackId="a" fill={palette.muted} />
+            </BarChart>
+          </ResponsiveContainer>
+        ) : <EmptyState />}
+      </Panel>
+    </>
+  );
+}
+
+function Timing({ data }: { data: DashboardData }) {
+  return (
+    <>
+      <div className="grid gap-4 xl:grid-cols-[1.3fr_0.7fr]">
+        <Panel title="Hourly Performance">
+          <ResponsiveContainer width="100%" height={380}>
+            <ComposedChart data={data.hourly}>
+              <CartesianGrid stroke={palette.grid} vertical={false} />
+              <XAxis dataKey="label" stroke={palette.muted} tick={{ fontSize: 11 }} />
+              <YAxis yAxisId="calls" stroke={palette.muted} tick={{ fontSize: 11 }} />
+              <YAxis yAxisId="rate" orientation="right" stroke={palette.muted} tick={{ fontSize: 11 }} domain={[0, 100]} tickFormatter={(value) => `${value}%`} />
+              <Tooltip contentStyle={tooltipStyle} />
+              <Legend wrapperStyle={{ color: palette.muted, fontSize: 12 }} />
+              <Bar yAxisId="calls" dataKey="totalCalls" name="Calls" fill={palette.cyan} radius={[4, 4, 0, 0]} />
+              <Line yAxisId="rate" type="monotone" dataKey="connectivityRate" name="Connectivity" stroke={palette.green} strokeWidth={2} dot={false} />
+              <Line yAxisId="rate" type="monotone" dataKey="qualificationRate" name="Qualification" stroke={palette.yellow} strokeWidth={2} dot={false} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </Panel>
+
+        <div className="grid gap-4">
+          <Panel title="Best Connectivity Hours">
+            <TopHours rows={data.bestConnectivityHours} mode="connectivity" />
+          </Panel>
+          <Panel title="Highest Volume Hours">
+            <TopHours rows={data.highestVolumeHours} mode="volume" />
+          </Panel>
         </div>
       </div>
 
-      {/* Daily Qualification Rate (Full Width) */}
-      <DailyQualificationRateChart data={data.callVolume} />
+      <Panel title="Hourly Qualification Split">
+        <ResponsiveContainer width="100%" height={320}>
+          <BarChart data={data.hourly}>
+            <CartesianGrid stroke={palette.grid} vertical={false} />
+            <XAxis dataKey="label" stroke={palette.muted} tick={{ fontSize: 11 }} />
+            <YAxis stroke={palette.muted} tick={{ fontSize: 11 }} />
+            <Tooltip contentStyle={tooltipStyle} />
+            <Legend wrapperStyle={{ color: palette.muted, fontSize: 12 }} />
+            <Bar dataKey="qualified" name="Qualified" stackId="a" fill={palette.green} />
+            <Bar dataKey="uncertain" name="Uncertain" stackId="a" fill={palette.orange} />
+            <Bar dataKey="notInterested" name="Not Interested" stackId="a" fill={palette.red} />
+          </BarChart>
+        </ResponsiveContainer>
+      </Panel>
+    </>
+  );
+}
 
-      {/* 2nd Section: Why Not Interested & Why Uncertain (50-50 Split) */}
-      <div className="flex flex-col md:flex-row gap-4 shrink-0">
-        <div className="flex-1 min-w-0 bg-card-bg border border-card-border rounded-xl p-4 flex flex-col justify-start">
-          <h2 className="text-sm font-semibold text-monade uppercase tracking-wider mb-4 shrink-0">Why Not Interested</h2>
-          <div className="flex-1 min-h-0">
-            <HorizontalBarChart data={data.notInterestedReasons} colors={colorPalette} />
-          </div>
-        </div>
-
-        <div className="flex-1 min-w-0 bg-card-bg border border-card-border rounded-xl p-4 flex flex-col justify-start">
-          <h2 className="text-sm font-semibold text-monade uppercase tracking-wider mb-4 shrink-0">Why Uncertain</h2>
-          <div className="flex-1 min-h-0">
-            <HorizontalBarChart data={data.uncertainReasons} colors={colorPalette} />
-          </div>
-        </div>
+function Qualification({ data }: { data: DashboardData }) {
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <MetricCard label="Qualified Leads" value={formatNumber(data.kpis.qualifiedLeads)} detail={`${formatPercent(data.kpis.qualificationRate)} of connected`} tone="green" />
+        <MetricCard label="Uncertain" value={formatNumber(data.kpis.uncertainLeads)} detail={`${formatNumber(data.kpis.callbackLeads)} callbacks tagged`} tone="orange" />
+        <MetricCard label="Not Interested" value={formatNumber(data.kpis.notInterestedCalls)} detail={`${formatPercent(data.kpis.notInterestedRate)} of connected`} tone="red" />
+        <MetricCard label="Avg Qualified Score" value={`${data.kpis.avgQualifiedScore}%`} detail="Post-call confidence" tone="cyan" />
       </div>
 
-      {/* 4th Section: Intelligence Statistics (50-50 Split) */}
-      <div className="flex flex-col md:flex-row gap-4 shrink-0">
-        <div className="flex-1 min-w-0 bg-card-bg border border-card-border rounded-xl p-4 flex flex-col justify-start relative">
-          <h2 className="text-sm font-semibold text-monade uppercase tracking-wider mb-4 shrink-0">Agent Intelligence Statistics (Comprehensive)</h2>
-          <div className="flex-1 w-full pb-6">
-            <HorizontalBarChart data={data.agentIntelligenceComprehensive} colors={colorPalette} valueMode="absolute" />
-          </div>
-          <div className="absolute bottom-3 right-6 text-[10px] text-muted italic">
-            *For calls more than 30 seconds
-          </div>
-        </div>
+      <div className="grid gap-4 xl:grid-cols-[0.75fr_1.25fr]">
+        <Panel title="Verdict Distribution">
+          <PieBlock data={data.verdictDistribution} />
+        </Panel>
 
-        <div className="flex-1 min-w-0 bg-card-bg border border-card-border rounded-xl p-4 flex flex-col justify-start relative">
-          <h2 className="text-sm font-semibold text-monade uppercase tracking-wider mb-4 shrink-0">Everyday's Connection Rate</h2>
-          <div className="flex-1 w-full pb-6">
-            <DailyConnectionRateChart data={data.callVolume} />
-          </div>
-        </div>
+        <Panel title="Why Leads Stayed Uncertain">
+          <HorizontalBarChart data={data.uncertainReasons} colors={[palette.orange, palette.yellow, palette.cyan, palette.violet, palette.muted]} valueMode="absolute" />
+        </Panel>
       </div>
 
-      {/* 5th Section: Objection Recovery & Saved Leads (50-50 Split) */}
-      <div className="flex flex-col md:flex-row gap-4 shrink-0">
-        <div className="flex-1 min-w-0 bg-card-bg border border-card-border rounded-xl p-4 flex flex-col justify-start">
-          <h2 className="text-sm font-semibold text-monade uppercase tracking-wider mb-4 shrink-0">Objections Successfully Recovered</h2>
-          <div className="flex-1 w-full pb-4">
-            <HorizontalBarChart data={data.objectionRecovery} colors={colorPalette} valueMode="absolute" />
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Panel title="Why Leads Were Not Interested">
+          <HorizontalBarChart data={data.notInterestedReasons} colors={[palette.red, palette.orange, palette.yellow, palette.cyan, palette.muted]} valueMode="absolute" />
+        </Panel>
+
+        <Panel title="Recoverable Lead Impact">
+          <HorizontalBarChart data={data.savedLeadsImpact} colors={[palette.green, palette.yellow, palette.orange]} valueMode="absolute" />
+        </Panel>
+      </div>
+    </>
+  );
+}
+
+function Operations({ data }: { data: DashboardData }) {
+  return (
+    <>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Panel title="Retry Bucket Breakdown">
+          <HorizontalBarChart data={data.retryBuckets} colors={[palette.green, palette.yellow, palette.orange, palette.red, palette.cyan, palette.violet]} valueMode="absolute" />
+        </Panel>
+
+        <Panel title="Platform Telemetry Coverage">
+          <HorizontalBarChart data={data.agentTelemetry} colors={[palette.cyan, palette.green, palette.yellow, palette.orange]} valueMode="absolute" />
+        </Panel>
+      </div>
+
+      <Panel title="Weekly Connectivity">
+        {data.weeklyConnectivity.length ? (
+          <ResponsiveContainer width="100%" height={320}>
+            <BarChart data={data.weeklyConnectivity}>
+              <CartesianGrid stroke={palette.grid} vertical={false} />
+              <XAxis dataKey="name" stroke={palette.muted} tick={{ fontSize: 11 }} />
+              <YAxis stroke={palette.muted} tick={{ fontSize: 11 }} domain={[0, 100]} tickFormatter={(value) => `${value}%`} />
+              <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => `${value}%`} />
+              <Bar dataKey="rate" name="Connectivity" fill={palette.green} radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        ) : <EmptyState />}
+      </Panel>
+    </>
+  );
+}
+
+export default function Dashboard({
+  data,
+  activePage,
+  loading,
+}: {
+  data: DashboardData;
+  activePage: DashboardPage;
+  loading: boolean;
+}) {
+  const periodLabel = `${data.meta.requestedRange.startLocal} to ${data.meta.requestedRange.endLocal}`;
+
+  return (
+    <div className="h-full w-full overflow-y-auto bg-background p-4 custom-scrollbar">
+      <div className="mx-auto flex max-w-[1600px] flex-col gap-4">
+        <div className="flex flex-col gap-3 border-b border-card-border pb-4 xl:flex-row xl:items-end xl:justify-between">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-md border border-card-border bg-card-bg px-3 py-1 text-xs text-muted">
+              <Sparkles size={14} className="text-monade" />
+              Live voice-agent analytics
+            </div>
+            <h1 className="mt-3 text-2xl font-semibold tracking-normal text-foreground md:text-3xl">
+              College Vidya Lead Qualification
+            </h1>
+            <p className="mt-2 text-sm text-muted">
+              {periodLabel} ({data.meta.timezone}) · Data through {formatDateTime(data.meta.filteredPeriodEnd, data.meta.timezone)}
+            </p>
+          </div>
+          <div className="text-left text-xs text-muted xl:text-right">
+            <div>Last refreshed {formatDateTime(data.meta.generatedAt, data.meta.timezone)}</div>
+            <div className={loading ? "text-monade" : ""}>{loading ? "Refreshing selected window..." : "All charts use the selected window"}</div>
           </div>
         </div>
 
-        <div className="flex-1 min-w-0 bg-card-bg border border-card-border rounded-xl p-4 flex flex-col justify-start">
-          <h2 className="text-sm font-semibold text-monade uppercase tracking-wider mb-4 shrink-0">Saved Leads Impact</h2>
-          <div className="flex-1 w-full pb-4">
-            <HorizontalBarChart data={data.savedLeadsImpact} colors={colorPalette} valueMode="absolute" />
-          </div>
-        </div>
+        {activePage === "overview" ? <Overview data={data} /> : null}
+        {activePage === "trends" ? <Trends data={data} /> : null}
+        {activePage === "timing" ? <Timing data={data} /> : null}
+        {activePage === "qualification" ? <Qualification data={data} /> : null}
+        {activePage === "operations" ? <Operations data={data} /> : null}
       </div>
-
-      {/* 6th Section: Call Volume (Bottom) */}
-      <div className="shrink-0 bg-card-bg border border-card-border rounded-xl p-4 flex flex-col justify-center">
-        <h2 className="text-sm font-semibold text-monade uppercase tracking-wider mb-4 shrink-0">Call Volume (10 Days)</h2>
-        <div className="flex-1 w-full pt-4 pb-8">
-          <StackedColumnChart data={data.callVolume} config={callVolumeConfig} />
-        </div>
-      </div>
-
     </div>
   );
 }

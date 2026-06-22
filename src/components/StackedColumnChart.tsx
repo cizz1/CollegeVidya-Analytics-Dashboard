@@ -1,16 +1,16 @@
 import React from "react";
-import { StackedBarConfig } from "./StackedBarChart";
+import { StackedBarConfig, StackedChartRow } from "./StackedBarChart";
 
 export default function StackedColumnChart({
   data,
   config,
 }: {
-  data: any[];
+  data: StackedChartRow[];
   config: StackedBarConfig[];
 }) {
   // Calculate total for each column to find the max total for scaling
   const totals = data.map((row) =>
-    config.reduce((sum, c) => sum + (row[c.key] || 0), 0)
+    config.reduce((sum, c) => sum + Number(row[c.key] || 0), 0)
   );
   const maxTotal = Math.max(...totals, 1);
 
@@ -49,7 +49,7 @@ export default function StackedColumnChart({
                 style={{ height: `${colHeight}%` }}
               >
                 {config.map((c, i) => {
-                  const val = row[c.key] || 0;
+                  const val = Number(row[c.key] || 0);
                   const segmentHeight = total > 0 ? (val / total) * 100 : 0;
                   if (segmentHeight === 0) return null;
 

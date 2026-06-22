@@ -1,9 +1,10 @@
 import React from "react";
+import { DashboardData } from "@/utils/fetchData";
 
 export default function DailyQualificationRateChart({
   data,
 }: {
-  data: any[];
+  data: DashboardData["daily"];
 }) {
   const rates = data.map(row => {
     // Qualification rate is calculated out of connected calls

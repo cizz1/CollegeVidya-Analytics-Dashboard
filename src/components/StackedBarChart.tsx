@@ -6,11 +6,16 @@ export interface StackedBarConfig {
   color: string;
 }
 
+export type StackedChartRow = {
+  name: string;
+  [key: string]: string | number;
+};
+
 export default function StackedBarChart({
   data,
   config,
 }: {
-  data: any[];
+  data: StackedChartRow[];
   config: StackedBarConfig[];
 }) {
   return (
@@ -31,7 +36,7 @@ export default function StackedBarChart({
       {/* Bars */}
       <div className="flex flex-col gap-5 w-full">
         {data.map((row, rowIndex) => {
-          const total = config.reduce((sum, c) => sum + (row[c.key] || 0), 0);
+          const total = config.reduce((sum, c) => sum + Number(row[c.key] || 0), 0);
 
           return (
             <div key={rowIndex} className="flex flex-col w-full group">
@@ -45,7 +50,7 @@ export default function StackedBarChart({
               </div>
               <div className="w-full h-2.5 bg-card-border rounded-full overflow-hidden flex">
                 {config.map((c, i) => {
-                  const val = row[c.key] || 0;
+                  const val = Number(row[c.key] || 0);
                   const width = total > 0 ? (val / total) * 100 : 0;
                   if (width === 0) return null;
 

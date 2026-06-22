@@ -1,9 +1,10 @@
 import React from "react";
+import { DashboardData } from "@/utils/fetchData";
 
 export default function DailyConnectionRateChart({
   data,
 }: {
-  data: any[];
+  data: DashboardData["daily"];
 }) {
   const rates = data.map(row => {
     const rate = row.totalCalls > 0 ? (row.connected / row.totalCalls) * 100 : 0;
