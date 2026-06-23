@@ -28,6 +28,7 @@ function FunnelNode({ x, y, w, h, label, value, color, denominator }: FunnelNode
 
 export default function FunnelChart({ data, avgScore, uncertainReasons = [] }: { data: DashboardData["funnel"], avgScore: number, uncertainReasons?: { name: string, value: number }[] }) {
   const { totalCalls, connected, didNotConnect, notInterested, qualified } = data;
+  const safeTotalCalls = Math.max(totalCalls, 1);
 
   // Extract the 3 sub-buckets for Uncertain
   const getReasonVal = (name: string) => uncertainReasons.find(r => r.name.toLowerCase().includes(name.toLowerCase()))?.value || 0;
@@ -53,7 +54,7 @@ export default function FunnelChart({ data, avgScore, uncertainReasons = [] }: {
   const maxH = height - 40; 
 
   // Calculate Heights based on values
-  const scale = (val: number) => Math.max((val / totalCalls) * maxH, 32); // min 32px for tight stacking
+  const scale = (val: number) => Math.max((val / safeTotalCalls) * maxH, 32); // min 32px for tight stacking
 
   const hTotal = scale(totalCalls);
   const hConnected = scale(connected);

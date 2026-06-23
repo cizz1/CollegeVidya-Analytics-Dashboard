@@ -36,6 +36,7 @@ const palette = {
 };
 
 const pieColors = [palette.green, palette.orange, palette.red, palette.yellow, palette.cyan, palette.violet, palette.muted];
+const chartAnimation = false;
 
 const formatNumber = (value: number) => value.toLocaleString("en-IN");
 
@@ -157,7 +158,7 @@ function PieBlock({ data }: { data: MetricPoint[] }) {
   return (
     <ResponsiveContainer width="100%" height={280}>
       <PieChart>
-        <Pie data={data} dataKey="value" nameKey="name" innerRadius={68} outerRadius={102} paddingAngle={2}>
+        <Pie data={data} dataKey="value" nameKey="name" innerRadius={68} outerRadius={102} paddingAngle={2} isAnimationActive={chartAnimation}>
           {data.map((_, index) => (
             <Cell key={index} fill={pieColors[index % pieColors.length]} />
           ))}
@@ -218,8 +219,8 @@ function Overview({ data }: { data: DashboardData }) {
                 <XAxis dataKey="name" stroke={palette.muted} tick={{ fontSize: 11 }} />
                 <YAxis stroke={palette.muted} tick={{ fontSize: 11 }} />
                 <Tooltip contentStyle={tooltipStyle} />
-                <Area type="monotone" dataKey="connected" name="Connected" stroke={palette.green} fill={palette.green} fillOpacity={0.18} />
-                <Area type="monotone" dataKey="qualified" name="Qualified" stroke={palette.yellow} fill={palette.yellow} fillOpacity={0.18} />
+                <Area type="monotone" dataKey="connected" name="Connected" stroke={palette.green} fill={palette.green} fillOpacity={0.18} isAnimationActive={chartAnimation} />
+                <Area type="monotone" dataKey="qualified" name="Qualified" stroke={palette.yellow} fill={palette.yellow} fillOpacity={0.18} isAnimationActive={chartAnimation} />
               </AreaChart>
             </ResponsiveContainer>
           ) : <EmptyState />}
@@ -262,8 +263,8 @@ function Trends({ data }: { data: DashboardData }) {
               <YAxis stroke={palette.muted} tick={{ fontSize: 11 }} domain={[0, 100]} tickFormatter={(value) => `${value}%`} />
               <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => `${value}%`} />
               <Legend wrapperStyle={{ color: palette.muted, fontSize: 12 }} />
-              <Line type="monotone" dataKey="connectivityRate" name="Connectivity" stroke={palette.green} strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="qualificationRate" name="Qualification" stroke={palette.yellow} strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="connectivityRate" name="Connectivity" stroke={palette.green} strokeWidth={2} dot={false} isAnimationActive={chartAnimation} />
+              <Line type="monotone" dataKey="qualificationRate" name="Qualification" stroke={palette.yellow} strokeWidth={2} dot={false} isAnimationActive={chartAnimation} />
             </LineChart>
           </ResponsiveContainer>
         ) : <EmptyState />}
@@ -278,10 +279,10 @@ function Trends({ data }: { data: DashboardData }) {
               <YAxis stroke={palette.muted} tick={{ fontSize: 11 }} />
               <Tooltip contentStyle={tooltipStyle} />
               <Legend wrapperStyle={{ color: palette.muted, fontSize: 12 }} />
-              <Bar dataKey="qualified" name="Qualified" stackId="a" fill={palette.green} />
-              <Bar dataKey="uncertain" name="Uncertain" stackId="a" fill={palette.orange} />
-              <Bar dataKey="notInterested" name="Not Interested" stackId="a" fill={palette.red} />
-              <Bar dataKey="didNotConnect" name="Did Not Connect" stackId="a" fill={palette.muted} />
+              <Bar dataKey="qualified" name="Qualified" stackId="a" fill={palette.green} isAnimationActive={chartAnimation} />
+              <Bar dataKey="uncertain" name="Uncertain" stackId="a" fill={palette.orange} isAnimationActive={chartAnimation} />
+              <Bar dataKey="notInterested" name="Not Interested" stackId="a" fill={palette.red} isAnimationActive={chartAnimation} />
+              <Bar dataKey="didNotConnect" name="Did Not Connect" stackId="a" fill={palette.muted} isAnimationActive={chartAnimation} />
             </BarChart>
           </ResponsiveContainer>
         ) : <EmptyState />}
@@ -303,9 +304,9 @@ function Timing({ data }: { data: DashboardData }) {
               <YAxis yAxisId="rate" orientation="right" stroke={palette.muted} tick={{ fontSize: 11 }} domain={[0, 100]} tickFormatter={(value) => `${value}%`} />
               <Tooltip contentStyle={tooltipStyle} />
               <Legend wrapperStyle={{ color: palette.muted, fontSize: 12 }} />
-              <Bar yAxisId="calls" dataKey="totalCalls" name="Calls" fill={palette.cyan} radius={[4, 4, 0, 0]} />
-              <Line yAxisId="rate" type="monotone" dataKey="connectivityRate" name="Connectivity" stroke={palette.green} strokeWidth={2} dot={false} />
-              <Line yAxisId="rate" type="monotone" dataKey="qualificationRate" name="Qualification" stroke={palette.yellow} strokeWidth={2} dot={false} />
+              <Bar yAxisId="calls" dataKey="totalCalls" name="Calls" fill={palette.cyan} radius={[4, 4, 0, 0]} isAnimationActive={chartAnimation} />
+              <Line yAxisId="rate" type="monotone" dataKey="connectivityRate" name="Connectivity" stroke={palette.green} strokeWidth={2} dot={false} isAnimationActive={chartAnimation} />
+              <Line yAxisId="rate" type="monotone" dataKey="qualificationRate" name="Qualification" stroke={palette.yellow} strokeWidth={2} dot={false} isAnimationActive={chartAnimation} />
             </ComposedChart>
           </ResponsiveContainer>
         </Panel>
@@ -328,9 +329,9 @@ function Timing({ data }: { data: DashboardData }) {
             <YAxis stroke={palette.muted} tick={{ fontSize: 11 }} />
             <Tooltip contentStyle={tooltipStyle} />
             <Legend wrapperStyle={{ color: palette.muted, fontSize: 12 }} />
-            <Bar dataKey="qualified" name="Qualified" stackId="a" fill={palette.green} />
-            <Bar dataKey="uncertain" name="Uncertain" stackId="a" fill={palette.orange} />
-            <Bar dataKey="notInterested" name="Not Interested" stackId="a" fill={palette.red} />
+            <Bar dataKey="qualified" name="Qualified" stackId="a" fill={palette.green} isAnimationActive={chartAnimation} />
+            <Bar dataKey="uncertain" name="Uncertain" stackId="a" fill={palette.orange} isAnimationActive={chartAnimation} />
+            <Bar dataKey="notInterested" name="Not Interested" stackId="a" fill={palette.red} isAnimationActive={chartAnimation} />
           </BarChart>
         </ResponsiveContainer>
       </Panel>
@@ -392,7 +393,7 @@ function Operations({ data }: { data: DashboardData }) {
               <XAxis dataKey="name" stroke={palette.muted} tick={{ fontSize: 11 }} />
               <YAxis stroke={palette.muted} tick={{ fontSize: 11 }} domain={[0, 100]} tickFormatter={(value) => `${value}%`} />
               <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => `${value}%`} />
-              <Bar dataKey="rate" name="Connectivity" fill={palette.green} radius={[4, 4, 0, 0]} />
+              <Bar dataKey="rate" name="Connectivity" fill={palette.green} radius={[4, 4, 0, 0]} isAnimationActive={chartAnimation} />
             </BarChart>
           </ResponsiveContainer>
         ) : <EmptyState />}

@@ -60,7 +60,9 @@ const USER_UID =
   process.env.COLLEGE_VIDYA_USER_UID || "091cf311-6949-42fd-b1d2-de3bb4b3bf48";
 const BACKEND_BASE_URL =
   process.env.COLLEGE_VIDYA_BACKEND_BASE_URL || "https://service.monade.ai/db_services";
-const RAW_CACHE_TTL_MS = 120_000;
+const RAW_CACHE_TTL_MS = 10 * 60 * 1000;
+const RESPONSE_CACHE_SECONDS = 90;
+const RESPONSE_STALE_SECONDS = 10 * 60;
 
 let rawCache:
   | {
@@ -633,9 +635,21 @@ export async function GET(request: NextRequest) {
       savedLeadsImpact: current.savedLeadsImpact,
     };
 
-    return NextResponse.json(response);
+    return NextResponse.json(response, {
+      headers: {
+        "Cache-Control": `public, s-maxage=${RESPONSE_CACHE_SECONDS}, stale-while-revalidate=${RESPONSE_STALE_SECONDS}`,
+      },
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown dashboard error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      { error: message },
+      {
+        status: 500,
+        headers: {
+          "Cache-Control": "no-store",
+        },
+      }
+    );
   }
 }

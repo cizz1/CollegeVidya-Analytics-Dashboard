@@ -197,9 +197,7 @@ export const fetchDashboardData = async (filters: DashboardFilters): Promise<Das
       params.set("endDate", filters.endDate);
     }
 
-    const response = await fetch(`/api/dashboard?${params.toString()}`, {
-      cache: "no-store",
-    });
+    const response = await fetch(`/api/dashboard?${params.toString()}`);
 
     if (!response.ok) {
       throw new Error(`Dashboard API failed with ${response.status}`);
