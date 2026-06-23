@@ -186,22 +186,57 @@ const emptyData: DashboardData = {
 };
 
 const BROWSER_CACHE_PREFIX = "cv-dashboard:";
-const BROWSER_CACHE_TTL_MS = 90 * 1000;
+const LIVE_BROWSER_CACHE_TTL_MS = 10 * 60 * 1000;
+const HISTORICAL_BROWSER_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 type CachedDashboardData = {
   savedAt: number;
   data: DashboardData;
 };
 
-const getCachedDashboardData = (key: string): DashboardData | null => {
+const todayInTimezone = (timezone: string) => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+
+  const get = (type: string) => parts.find((part) => part.type === type)?.value || "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+};
+
+const isHistoricalRange = (filters: DashboardFilters) => {
+  if (filters.preset === "yesterday") return true;
+  if (filters.preset !== "custom") return false;
+  const endDate = filters.endDate || filters.startDate;
+  return Boolean(endDate && endDate < todayInTimezone(filters.timezone));
+};
+
+const cacheConfigForFilters = (filters: DashboardFilters) => {
+  const historical = isHistoricalRange(filters);
+  return {
+    ttlMs: historical ? HISTORICAL_BROWSER_CACHE_TTL_MS : LIVE_BROWSER_CACHE_TTL_MS,
+    storageName: historical ? "localStorage" : "sessionStorage",
+  } as const;
+};
+
+const getStorage = (storageName: "localStorage" | "sessionStorage") => {
+  if (typeof window === "undefined") return null;
+  return storageName === "localStorage" ? window.localStorage : window.sessionStorage;
+};
+
+const getCachedDashboardData = (key: string, ttlMs: number, storageName: "localStorage" | "sessionStorage"): DashboardData | null => {
   if (typeof window === "undefined") return null;
 
   try {
-    const raw = window.sessionStorage.getItem(key);
+    const storage = getStorage(storageName);
+    if (!storage) return null;
+    const raw = storage.getItem(key);
     if (!raw) return null;
     const cached = JSON.parse(raw) as CachedDashboardData;
-    if (!cached?.savedAt || Date.now() - cached.savedAt > BROWSER_CACHE_TTL_MS) {
-      window.sessionStorage.removeItem(key);
+    if (!cached?.savedAt || Date.now() - cached.savedAt > ttlMs) {
+      storage.removeItem(key);
       return null;
     }
     return cached.data;
@@ -210,11 +245,13 @@ const getCachedDashboardData = (key: string): DashboardData | null => {
   }
 };
 
-const setCachedDashboardData = (key: string, data: DashboardData) => {
+const setCachedDashboardData = (key: string, data: DashboardData, storageName: "localStorage" | "sessionStorage") => {
   if (typeof window === "undefined") return;
 
   try {
-    window.sessionStorage.setItem(
+    const storage = getStorage(storageName);
+    if (!storage) return;
+    storage.setItem(
       key,
       JSON.stringify({
         savedAt: Date.now(),
@@ -238,7 +275,8 @@ export const fetchDashboardData = async (filters: DashboardFilters): Promise<Das
   }
 
   const cacheKey = `${BROWSER_CACHE_PREFIX}${params.toString()}`;
-  const cachedData = getCachedDashboardData(cacheKey);
+  const { ttlMs, storageName } = cacheConfigForFilters(filters);
+  const cachedData = getCachedDashboardData(cacheKey, ttlMs, storageName);
   if (cachedData) return cachedData;
 
   try {
@@ -249,10 +287,10 @@ export const fetchDashboardData = async (filters: DashboardFilters): Promise<Das
     }
 
     const data = await response.json();
-    setCachedDashboardData(cacheKey, data);
+    setCachedDashboardData(cacheKey, data, storageName);
     return data;
   } catch (err) {
     console.error("Error fetching live dashboard data", err);
-    return getCachedDashboardData(cacheKey) || emptyData;
+    return getCachedDashboardData(cacheKey, ttlMs, storageName) || emptyData;
   }
 };

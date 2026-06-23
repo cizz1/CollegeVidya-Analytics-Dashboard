@@ -60,10 +60,13 @@ const USER_UID =
   process.env.COLLEGE_VIDYA_USER_UID || "091cf311-6949-42fd-b1d2-de3bb4b3bf48";
 const BACKEND_BASE_URL =
   process.env.COLLEGE_VIDYA_BACKEND_BASE_URL || "https://service.monade.ai/db_services";
-const RAW_CACHE_TTL_MS = 10 * 60 * 1000;
-const BROWSER_CACHE_SECONDS = 60;
-const RESPONSE_CACHE_SECONDS = 90;
-const RESPONSE_STALE_SECONDS = 10 * 60;
+const RAW_CACHE_TTL_MS = 60 * 60 * 1000;
+const LIVE_BROWSER_CACHE_SECONDS = 10 * 60;
+const LIVE_RESPONSE_CACHE_SECONDS = 10 * 60;
+const LIVE_RESPONSE_STALE_SECONDS = 60 * 60;
+const HISTORICAL_BROWSER_CACHE_SECONDS = 60 * 60;
+const HISTORICAL_RESPONSE_CACHE_SECONDS = 12 * 60 * 60;
+const HISTORICAL_RESPONSE_STALE_SECONDS = 7 * 24 * 60 * 60;
 
 let rawCache:
   | {
@@ -225,6 +228,19 @@ const buildRange = (request: NextRequest): RangeConfig => {
     previousStartUtcMs: startUtcMs - periodMs,
     previousEndUtcMs: startUtcMs - 1,
   };
+};
+
+const isHistoricalRange = (range: RangeConfig) => {
+  const today = formatInTimezone(new Date(), range.timezone).date;
+  return range.endDate < today;
+};
+
+const cacheHeaderForRange = (range: RangeConfig) => {
+  const historical = isHistoricalRange(range);
+  const browserCache = historical ? HISTORICAL_BROWSER_CACHE_SECONDS : LIVE_BROWSER_CACHE_SECONDS;
+  const cdnCache = historical ? HISTORICAL_RESPONSE_CACHE_SECONDS : LIVE_RESPONSE_CACHE_SECONDS;
+  const stale = historical ? HISTORICAL_RESPONSE_STALE_SECONDS : LIVE_RESPONSE_STALE_SECONDS;
+  return `public, max-age=${browserCache}, s-maxage=${cdnCache}, stale-while-revalidate=${stale}`;
 };
 
 const getRecordMs = (record: AnalyticsRecord) => {
@@ -638,7 +654,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(response, {
       headers: {
-        "Cache-Control": `public, max-age=${BROWSER_CACHE_SECONDS}, s-maxage=${RESPONSE_CACHE_SECONDS}, stale-while-revalidate=${RESPONSE_STALE_SECONDS}`,
+        "Cache-Control": cacheHeaderForRange(range),
       },
     });
   } catch (error) {
