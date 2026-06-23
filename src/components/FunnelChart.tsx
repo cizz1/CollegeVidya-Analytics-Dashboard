@@ -26,7 +26,7 @@ function FunnelNode({ x, y, w, h, label, value, color, denominator }: FunnelNode
   );
 }
 
-export default function FunnelChart({ data, avgScore, uncertainReasons = [] }: { data: DashboardData["funnel"], avgScore: number, uncertainReasons?: { name: string, value: number }[] }) {
+export default function FunnelChart({ data, uncertainReasons = [] }: { data: DashboardData["funnel"], uncertainReasons?: { name: string, value: number }[] }) {
   const { totalCalls, connected, didNotConnect, notInterested, qualified } = data;
   const safeTotalCalls = Math.max(totalCalls, 1);
 
@@ -134,18 +134,6 @@ export default function FunnelChart({ data, avgScore, uncertainReasons = [] }: {
       <FunnelNode x={x3} y={y3UncVoice} w={boxWidth} h={hUncVoice} label="Voicemail" value={uncVoicemail || uncertain * 0.2} color="#ff9100" denominator={sumStage3} />
       <FunnelNode x={x3} y={y3UncOther} w={boxWidth} h={hUncOther} label="Other Uncertain" value={uncOther || uncertain * 0.2} color="#ffaa00" denominator={sumStage3} />
       <FunnelNode x={x3} y={y3Qual} w={boxWidth} h={hQual} label="Qualified" value={qualified} color="#00d26a" denominator={sumStage3} />
-
-      {/* Avg Qualified Score Card */}
-      <g transform={`translate(${x3}, ${y2Dnc + hDidNotConnect - 32})`}>
-        <rect x={0} y={0} width={boxWidth} height={32} fill="#1a1a1a" stroke="#262626" strokeWidth={1} rx={4} />
-        <text x={8} y={16} fill="#a3a3a3" fontSize={9} fontWeight="bold" textAnchor="start" dominantBaseline="middle">
-          AVG QUALIFIED SCORE:
-        </text>
-        <text x={boxWidth - 8} y={16} fill="#00d26a" fontSize={12} fontWeight="bold" textAnchor="end" dominantBaseline="middle">
-          {avgScore}%
-        </text>
-      </g>
-      
     </svg>
   );
 }

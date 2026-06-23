@@ -185,27 +185,74 @@ const emptyData: DashboardData = {
   savedLeadsImpact: [],
 };
 
-export const fetchDashboardData = async (filters: DashboardFilters): Promise<DashboardData> => {
-  try {
-    const params = new URLSearchParams();
-    params.set("preset", filters.preset);
-    params.set("timezone", filters.timezone);
-    params.set("startTime", filters.startTime);
-    params.set("endTime", filters.endTime);
-    if (filters.preset === "custom") {
-      params.set("startDate", filters.startDate);
-      params.set("endDate", filters.endDate);
-    }
+const BROWSER_CACHE_PREFIX = "cv-dashboard:";
+const BROWSER_CACHE_TTL_MS = 90 * 1000;
 
+type CachedDashboardData = {
+  savedAt: number;
+  data: DashboardData;
+};
+
+const getCachedDashboardData = (key: string): DashboardData | null => {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    if (!raw) return null;
+    const cached = JSON.parse(raw) as CachedDashboardData;
+    if (!cached?.savedAt || Date.now() - cached.savedAt > BROWSER_CACHE_TTL_MS) {
+      window.sessionStorage.removeItem(key);
+      return null;
+    }
+    return cached.data;
+  } catch {
+    return null;
+  }
+};
+
+const setCachedDashboardData = (key: string, data: DashboardData) => {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.sessionStorage.setItem(
+      key,
+      JSON.stringify({
+        savedAt: Date.now(),
+        data,
+      } satisfies CachedDashboardData)
+    );
+  } catch {
+    // Storage can fail in private mode or when quota is full; the network path still works.
+  }
+};
+
+export const fetchDashboardData = async (filters: DashboardFilters): Promise<DashboardData> => {
+  const params = new URLSearchParams();
+  params.set("preset", filters.preset);
+  params.set("timezone", filters.timezone);
+  params.set("startTime", filters.startTime);
+  params.set("endTime", filters.endTime);
+  if (filters.preset === "custom") {
+    params.set("startDate", filters.startDate);
+    params.set("endDate", filters.endDate);
+  }
+
+  const cacheKey = `${BROWSER_CACHE_PREFIX}${params.toString()}`;
+  const cachedData = getCachedDashboardData(cacheKey);
+  if (cachedData) return cachedData;
+
+  try {
     const response = await fetch(`/api/dashboard?${params.toString()}`);
 
     if (!response.ok) {
       throw new Error(`Dashboard API failed with ${response.status}`);
     }
 
-    return await response.json();
+    const data = await response.json();
+    setCachedDashboardData(cacheKey, data);
+    return data;
   } catch (err) {
     console.error("Error fetching live dashboard data", err);
-    return emptyData;
+    return getCachedDashboardData(cacheKey) || emptyData;
   }
 };

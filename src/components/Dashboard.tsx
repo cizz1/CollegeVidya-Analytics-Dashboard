@@ -236,7 +236,7 @@ function Overview({ data }: { data: DashboardData }) {
         action={<span className="text-xs text-muted">Avg qualified score {data.kpis.avgQualifiedScore}%</span>}
       >
         <div className="flex items-center justify-center">
-          <FunnelChart data={data.funnel} avgScore={data.kpis.avgQualifiedScore} uncertainReasons={data.uncertainReasons} />
+          <FunnelChart data={data.funnel} uncertainReasons={data.uncertainReasons} />
         </div>
       </Panel>
     </>

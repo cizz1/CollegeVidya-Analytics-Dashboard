@@ -61,6 +61,7 @@ const USER_UID =
 const BACKEND_BASE_URL =
   process.env.COLLEGE_VIDYA_BACKEND_BASE_URL || "https://service.monade.ai/db_services";
 const RAW_CACHE_TTL_MS = 10 * 60 * 1000;
+const BROWSER_CACHE_SECONDS = 60;
 const RESPONSE_CACHE_SECONDS = 90;
 const RESPONSE_STALE_SECONDS = 10 * 60;
 
@@ -637,7 +638,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(response, {
       headers: {
-        "Cache-Control": `public, s-maxage=${RESPONSE_CACHE_SECONDS}, stale-while-revalidate=${RESPONSE_STALE_SECONDS}`,
+        "Cache-Control": `public, max-age=${BROWSER_CACHE_SECONDS}, s-maxage=${RESPONSE_CACHE_SECONDS}, stale-while-revalidate=${RESPONSE_STALE_SECONDS}`,
       },
     });
   } catch (error) {
