@@ -38,19 +38,25 @@ const palette = {
 const pieColors = [palette.green, palette.orange, palette.red, palette.yellow, palette.cyan, palette.violet, palette.muted];
 const chartAnimation = false;
 
-const formatNumber = (value: number) => value.toLocaleString("en-IN");
+const safeNumber = (value: number | null | undefined) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
 
-const formatPercent = (value: number) => `${value.toFixed(value % 1 === 0 ? 0 : 1)}%`;
+const formatNumber = (value: number | null | undefined) => safeNumber(value).toLocaleString("en-IN");
 
-const formatDecimal = (value: number) =>
-  value.toLocaleString("en-IN", {
+const formatPercent = (value: number | null | undefined) => {
+  const numeric = safeNumber(value);
+  return `${numeric.toFixed(numeric % 1 === 0 ? 0 : 1)}%`;
+};
+
+const formatDecimal = (value: number | null | undefined) =>
+  safeNumber(value).toLocaleString("en-IN", {
     maximumFractionDigits: 2,
   });
 
-const formatDuration = (seconds: number | null) => {
-  if (seconds === null) return "No data";
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
+const formatDuration = (seconds: number | null | undefined) => {
+  if (seconds == null) return "No data";
+  const safeSeconds = safeNumber(seconds);
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainingSeconds = safeSeconds % 60;
   return minutes > 0 ? `${minutes}m ${String(remainingSeconds).padStart(2, "0")}s` : `${remainingSeconds}s`;
 };
 
@@ -192,19 +198,27 @@ function PieBlock({ data }: { data: MetricPoint[] }) {
   );
 }
 
-function TopHours({ rows, mode }: { rows: HourlyPoint[]; mode: "connectivity" | "volume" | "qualification" | "uncertain" }) {
+function TopHours({
+  rows,
+  mode,
+  totalCalls = 0,
+}: {
+  rows: HourlyPoint[];
+  mode: "connectivity" | "volume" | "qualification" | "uncertain";
+  totalCalls?: number;
+}) {
   if (!rows.length) return <EmptyState />;
 
   const valueForMode = (row: HourlyPoint) => {
     if (mode === "connectivity") return formatPercent(row.connectivityRate);
     if (mode === "qualification") return formatPercent(row.qualificationRate);
     if (mode === "uncertain") return formatPercent(row.connected > 0 ? (row.uncertain / row.connected) * 100 : 0);
-    return formatNumber(row.totalCalls);
+    return formatPercent(percentOfTotal(row.totalCalls, totalCalls));
   };
 
   const labelForMode = {
     connectivity: "connect",
-    volume: "calls",
+    volume: "of calls",
     qualification: "qualified",
     uncertain: "uncertain",
   }[mode];
@@ -240,6 +254,8 @@ function TopHours({ rows, mode }: { rows: HourlyPoint[]; mode: "connectivity" | 
     </div>
   );
 }
+
+const percentOfTotal = (part: number, total: number) => (total > 0 ? Math.round((part / total) * 1000) / 10 : 0);
 
 function Overview({ data }: { data: DashboardData }) {
   return (
@@ -279,8 +295,10 @@ function Overview({ data }: { data: DashboardData }) {
         title="Qualification Funnel"
         action={<span className="text-xs text-muted">{formatNumber(data.kpis.highConfidenceQualifiedLeads)} high score leads · score &gt; 80</span>}
       >
-        <div className="flex items-center justify-center">
+        <div className="overflow-auto pb-2">
+          <div className="min-w-[1160px]">
           <FunnelChart data={data.funnel} uncertainReasons={data.uncertainReasons} />
+          </div>
         </div>
       </Panel>
     </>
@@ -343,9 +361,9 @@ function Timing({ data }: { data: DashboardData }) {
 
   return (
     <>
-      <div className="grid gap-4 xl:grid-cols-[1.3fr_0.7fr]">
-        <Panel title="Hourly Performance">
-          <ResponsiveContainer width="100%" height={380}>
+      <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+        <Panel title="Hourly Performance" className="self-start">
+          <ResponsiveContainer width="100%" height={320}>
             <ComposedChart data={hourlyWithUncertainRate}>
               <CartesianGrid stroke={palette.grid} vertical={false} />
               <XAxis dataKey="label" stroke={palette.muted} tick={{ fontSize: 11 }} />
@@ -366,7 +384,7 @@ function Timing({ data }: { data: DashboardData }) {
             <TopHours rows={data.bestConnectivityHours} mode="connectivity" />
           </Panel>
           <Panel title="Highest Volume Hours">
-            <TopHours rows={data.highestVolumeHours} mode="volume" />
+            <TopHours rows={data.highestVolumeHours} mode="volume" totalCalls={data.kpis.totalCalls} />
           </Panel>
           <Panel title="Highest Qualification Hours">
             <TopHours rows={data.highestQualificationHours} mode="qualification" />
@@ -442,13 +460,13 @@ function Operations({ data }: { data: DashboardData }) {
         <MetricCard label="Credits / Call" value={formatDecimal(metricValue("Credits per call"))} detail={`${formatNumber(data.kpis.creditsSpent)} total credits`} tone="orange" />
         <MetricCard label="Avg Call Duration" value={formatDuration(metricValue("Avg call duration (sec)"))} detail="All calls with duration" tone="cyan" />
         <MetricCard label="Avg Connected Duration" value={formatDuration(metricValue("Avg connected duration (sec)"))} detail="Connected calls only" tone="green" />
-        <MetricCard label="Unique Leads" value={formatNumber(data.kpis.totalLeadsAttempted)} detail={`${formatNumber(data.kpis.totalCalls)} total call attempts`} />
+        <MetricCard label="Distinct Leads Called" value={formatNumber(data.kpis.totalLeadsAttempted)} detail={`${formatNumber(data.kpis.totalCalls)} total call attempts`} />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
         <Panel
-          title="Fresh Vs Retry Leads"
-          action={<InfoTip text="Fresh leads are leads where the selected call is the first SARA attempt. Retry leads are leads where the selected call is attempt 2 or later. Qualification is calculated over connected calls inside the selected date and time window." />}
+          title="Fresh Vs Retry Call Mix"
+          action={<InfoTip text="Fresh means the first-ever observed SARA call for that contact is inside the selected window. Retry means the call is attempt 2 or later, even if the first call happened yesterday or two days earlier. The distinct leads KPI above is de-duplicated across the whole selected window, so it should not be added to these call-volume buckets." />}
         >
           <div className="space-y-3">
             {data.leadSegments.map((segment) => (
@@ -457,7 +475,9 @@ function Operations({ data }: { data: DashboardData }) {
                   <div>
                     <div className="text-sm font-semibold text-foreground">{segment.name}</div>
                     <div className="mt-1 text-xs text-muted">
-                      {formatNumber(segment.uniqueLeads)} unique leads · {formatNumber(segment.totalCalls)} calls
+                      {segment.name === "Fresh leads called"
+                        ? `${formatNumber(segment.totalCalls)} first-attempt calls`
+                        : `${formatNumber(segment.totalCalls)} retry calls across ${formatNumber(segment.uniqueLeads)} leads`}
                     </div>
                   </div>
                   <div className="text-right">
@@ -531,7 +551,7 @@ function AttemptTable({ rows }: { rows: AttemptPerformance[] }) {
           <tr className="border-b border-card-border text-left text-[11px] uppercase tracking-wider text-muted">
             <th className="py-3 pr-4 font-semibold">Attempt</th>
             <th className="py-3 pr-4 font-semibold">Schedule</th>
-            <th className="py-3 pr-4 text-right font-semibold">Unique Leads</th>
+            <th className="py-3 pr-4 text-right font-semibold">Leads Called</th>
             <th className="py-3 pr-4 text-right font-semibold">Total Calls</th>
             <th className="py-3 pr-4 text-right font-semibold">Connected</th>
             <th className="py-3 pr-4 text-right font-semibold">Qualified</th>

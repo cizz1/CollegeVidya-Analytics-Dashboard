@@ -613,7 +613,7 @@ function aggregate(records: EnrichedAnalyticsRecord[], campaigns: CampaignRecord
 
   const leadSegments: LeadSegment[] = [
     {
-      name: "Fresh leads",
+      name: "Fresh leads called",
       uniqueLeads: freshLeadKeys.size,
       totalCalls: segmentStats.fresh.totalCalls,
       connected: segmentStats.fresh.connected,
@@ -623,7 +623,7 @@ function aggregate(records: EnrichedAnalyticsRecord[], campaigns: CampaignRecord
       qualificationRate: percent(segmentStats.fresh.qualified, segmentStats.fresh.connected),
     },
     {
-      name: "Retry leads",
+      name: "Retry call volume",
       uniqueLeads: retryLeadKeys.size,
       totalCalls: segmentStats.retry.totalCalls,
       connected: segmentStats.retry.connected,

@@ -14,6 +14,9 @@ type FunnelNodeProps = {
 };
 
 function FunnelNode({ x, y, w, h, label, value, color, denominator, note }: FunnelNodeProps) {
+  const safeValue = Number.isFinite(value) ? value : 0;
+  const safeDenominator = Number.isFinite(denominator) && denominator > 0 ? denominator : 1;
+
   return (
     <g>
       <rect x={x} y={y} width={w} height={h} fill={color} rx={4} />
@@ -21,7 +24,7 @@ function FunnelNode({ x, y, w, h, label, value, color, denominator, note }: Funn
         {label}
       </text>
       <text x={x + w / 2} y={y + h / 2 + (note ? 3 : 8)} fill="rgba(255,255,255,0.7)" fontSize={9} textAnchor="middle" dominantBaseline="middle">
-        {value.toLocaleString()} ({Math.round((value / (denominator || 1)) * 100)}%)
+        {safeValue.toLocaleString()} ({Math.round((safeValue / safeDenominator) * 100)}%)
       </text>
       {note ? (
         <text x={x + w / 2} y={y + h / 2 + 16} fill="rgba(255,255,255,0.72)" fontSize={8} textAnchor="middle" dominantBaseline="middle">

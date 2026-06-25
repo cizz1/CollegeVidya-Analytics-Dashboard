@@ -301,6 +301,47 @@ const setCachedDashboardData = (key: string, data: DashboardData, storageName: "
   }
 };
 
+const normalizeDashboardData = (data: Partial<DashboardData>): DashboardData => ({
+  ...emptyData,
+  ...data,
+  meta: {
+    ...emptyData.meta,
+    ...(data.meta || {}),
+    requestedRange: {
+      ...emptyData.meta.requestedRange,
+      ...(data.meta?.requestedRange || {}),
+    },
+  },
+  kpis: {
+    ...emptyData.kpis,
+    ...(data.kpis || {}),
+  },
+  comparisons: {
+    ...emptyData.comparisons,
+    ...(data.comparisons || {}),
+  },
+  funnel: {
+    ...emptyData.funnel,
+    ...(data.funnel || {}),
+  },
+  daily: data.daily || [],
+  hourly: data.hourly || [],
+  verdictDistribution: data.verdictDistribution || [],
+  callOutcomeDistribution: data.callOutcomeDistribution || [],
+  notInterestedReasons: data.notInterestedReasons || [],
+  uncertainReasons: data.uncertainReasons || [],
+  retryBuckets: data.retryBuckets || [],
+  weeklyConnectivity: data.weeklyConnectivity || [],
+  bestConnectivityHours: data.bestConnectivityHours || [],
+  highestVolumeHours: data.highestVolumeHours || [],
+  highestQualificationHours: data.highestQualificationHours || [],
+  highestUncertainHours: data.highestUncertainHours || [],
+  leadSegments: data.leadSegments || [],
+  attemptPerformance: data.attemptPerformance || [],
+  operationalMetrics: data.operationalMetrics || [],
+  savedLeadsImpact: data.savedLeadsImpact || [],
+});
+
 export const fetchDashboardData = async (filters: DashboardFilters): Promise<DashboardData> => {
   const params = new URLSearchParams();
   params.set("preset", filters.preset);
@@ -315,7 +356,7 @@ export const fetchDashboardData = async (filters: DashboardFilters): Promise<Das
   const cacheKey = `${BROWSER_CACHE_PREFIX}${params.toString()}`;
   const { ttlMs, storageName } = cacheConfigForFilters(filters);
   const cachedData = getCachedDashboardData(cacheKey, ttlMs, storageName);
-  if (cachedData) return cachedData;
+  if (cachedData) return normalizeDashboardData(cachedData);
 
   try {
     const response = await fetch(`/api/dashboard?${params.toString()}`);
@@ -324,11 +365,11 @@ export const fetchDashboardData = async (filters: DashboardFilters): Promise<Das
       throw new Error(`Dashboard API failed with ${response.status}`);
     }
 
-    const data = await response.json();
+    const data = normalizeDashboardData(await response.json());
     setCachedDashboardData(cacheKey, data, storageName);
     return data;
   } catch (err) {
     console.error("Error fetching live dashboard data", err);
-    return getCachedDashboardData(cacheKey, ttlMs, storageName) || emptyData;
+    return normalizeDashboardData(getCachedDashboardData(cacheKey, ttlMs, storageName) || emptyData);
   }
 };
