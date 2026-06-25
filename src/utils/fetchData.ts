@@ -44,6 +44,30 @@ export interface HourlyPoint {
   avgTalkTimeSeconds: number | null;
 }
 
+export interface LeadSegment {
+  name: string;
+  uniqueLeads: number;
+  totalCalls: number;
+  connected: number;
+  qualified: number;
+  uncertain: number;
+  connectivityRate: number;
+  qualificationRate: number;
+}
+
+export interface AttemptPerformance {
+  attemptNumber: number;
+  label: string;
+  schedule: string;
+  uniqueLeads: number;
+  totalCalls: number;
+  connected: number;
+  qualified: number;
+  uncertain: number;
+  connectivityRate: number;
+  qualificationRate: number;
+}
+
 export interface DashboardData {
   meta: {
     generatedAt: string;
@@ -77,6 +101,8 @@ export interface DashboardData {
     avgTalkTimeSeconds: number | null;
     creditsSpent: number;
     avgQualifiedScore: number;
+    highConfidenceQualifiedLeads: number;
+    highConfidenceQualifiedRate: number;
   };
   comparisons: {
     previousTotalCalls: number;
@@ -95,6 +121,7 @@ export interface DashboardData {
     notInterested: number;
     uncertain: number;
     qualified: number;
+    highConfidenceQualified: number;
   };
   daily: DailyPoint[];
   hourly: HourlyPoint[];
@@ -106,7 +133,11 @@ export interface DashboardData {
   weeklyConnectivity: { name: string; connected: number; totalCalls: number; rate: number }[];
   bestConnectivityHours: HourlyPoint[];
   highestVolumeHours: HourlyPoint[];
-  agentTelemetry: MetricPoint[];
+  highestQualificationHours: HourlyPoint[];
+  highestUncertainHours: HourlyPoint[];
+  leadSegments: LeadSegment[];
+  attemptPerformance: AttemptPerformance[];
+  operationalMetrics: MetricPoint[];
   savedLeadsImpact: MetricPoint[];
 }
 
@@ -152,6 +183,8 @@ const emptyData: DashboardData = {
     avgTalkTimeSeconds: null,
     creditsSpent: 0,
     avgQualifiedScore: 0,
+    highConfidenceQualifiedLeads: 0,
+    highConfidenceQualifiedRate: 0,
   },
   comparisons: {
     previousTotalCalls: 0,
@@ -170,6 +203,7 @@ const emptyData: DashboardData = {
     notInterested: 0,
     uncertain: 0,
     qualified: 0,
+    highConfidenceQualified: 0,
   },
   daily: [],
   hourly: [],
@@ -181,7 +215,11 @@ const emptyData: DashboardData = {
   weeklyConnectivity: [],
   bestConnectivityHours: [],
   highestVolumeHours: [],
-  agentTelemetry: [],
+  highestQualificationHours: [],
+  highestUncertainHours: [],
+  leadSegments: [],
+  attemptPerformance: [],
+  operationalMetrics: [],
   savedLeadsImpact: [],
 };
 

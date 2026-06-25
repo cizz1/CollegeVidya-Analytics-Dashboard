@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import type { DashboardData, DatePreset, DailyPoint, HourlyPoint, MetricPoint } from "@/utils/fetchData";
+import type { AttemptPerformance, DashboardData, DatePreset, DailyPoint, HourlyPoint, LeadSegment, MetricPoint } from "@/utils/fetchData";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +18,11 @@ type AnalyticsRecord = {
   billing_data?: JsonRecord | null;
   provider_call_status?: JsonRecord | null;
   created_at?: string | null;
+};
+
+type EnrichedAnalyticsRecord = AnalyticsRecord & {
+  attemptNumber: number;
+  leadKey: string;
 };
 
 type CampaignRecord = {
@@ -50,7 +55,11 @@ type AggregateResult = {
   weeklyConnectivity: DashboardData["weeklyConnectivity"];
   bestConnectivityHours: HourlyPoint[];
   highestVolumeHours: HourlyPoint[];
-  agentTelemetry: MetricPoint[];
+  highestQualificationHours: HourlyPoint[];
+  highestUncertainHours: HourlyPoint[];
+  leadSegments: LeadSegment[];
+  attemptPerformance: AttemptPerformance[];
+  operationalMetrics: MetricPoint[];
   savedLeadsImpact: MetricPoint[];
   filteredPeriodStart: string | null;
   filteredPeriodEnd: string | null;
@@ -250,6 +259,12 @@ const getRecordMs = (record: AnalyticsRecord) => {
   return Number.isFinite(ms) ? ms : null;
 };
 
+const getLeadKey = (record: AnalyticsRecord) =>
+  record.contact_id ||
+  record.phone_number ||
+  record.call_id ||
+  `unknown:${record.call_started_at || record.created_at || "no-timestamp"}:${record.duration_seconds || 0}`;
+
 const matchesTimeWindow = (record: AnalyticsRecord, range: RangeConfig) => {
   const ms = getRecordMs(record);
   if (ms === null) return false;
@@ -260,11 +275,39 @@ const matchesTimeWindow = (record: AnalyticsRecord, range: RangeConfig) => {
   return start <= end ? minutes >= start && minutes <= end : minutes >= start || minutes <= end;
 };
 
-const recordsInWindow = (records: AnalyticsRecord[], startMs: number, endMs: number, range: RangeConfig) =>
+const recordsInWindow = <T extends AnalyticsRecord>(records: T[], startMs: number, endMs: number, range: RangeConfig) =>
   records.filter((record) => {
     const ms = getRecordMs(record);
     return ms !== null && ms >= startMs && ms <= endMs && matchesTimeWindow(record, range);
   });
+
+const enrichRecordsWithAttempts = (records: AnalyticsRecord[]): EnrichedAnalyticsRecord[] => {
+  const byLead = new Map<string, AnalyticsRecord[]>();
+  for (const record of records) {
+    const leadKey = getLeadKey(record);
+    const list = byLead.get(leadKey) || [];
+    list.push(record);
+    byLead.set(leadKey, list);
+  }
+
+  const attemptByRecord = new Map<AnalyticsRecord, { attemptNumber: number; leadKey: string }>();
+  for (const [leadKey, leadRecords] of byLead.entries()) {
+    leadRecords
+      .sort((a, b) => (getRecordMs(a) || 0) - (getRecordMs(b) || 0))
+      .forEach((record, index) => {
+        attemptByRecord.set(record, { attemptNumber: index + 1, leadKey });
+      });
+  }
+
+  return records.map((record) => {
+    const attempt = attemptByRecord.get(record);
+    return {
+      ...record,
+      attemptNumber: attempt?.attemptNumber || 1,
+      leadKey: attempt?.leadKey || getLeadKey(record),
+    };
+  });
+};
 
 const normalizeVerdict = (record: AnalyticsRecord) => {
   const analytics = asRecord(record.analytics);
@@ -354,7 +397,18 @@ async function getBackendData() {
   return rawCachePromise;
 }
 
-function aggregate(records: AnalyticsRecord[], campaigns: CampaignRecord[], range: RangeConfig): AggregateResult {
+const attemptSchedules = [
+  "First SARA call, usually within 3-4 minutes of lead arrival",
+  "Retry after 1 hour",
+  "Retry after 2 hours",
+  "Retry after 3 hours",
+  "Next day around 6 PM",
+  "Next day around 7-8 PM",
+  "Third day around 6 PM",
+  "Final retry around 7-8 PM",
+];
+
+function aggregate(records: EnrichedAnalyticsRecord[], campaigns: CampaignRecord[], range: RangeConfig): AggregateResult {
   let connected = 0;
   let didNotConnect = 0;
   let qualified = 0;
@@ -363,11 +417,16 @@ function aggregate(records: AnalyticsRecord[], campaigns: CampaignRecord[], rang
   let notInterested = 0;
   let talkSeconds = 0;
   let talkCount = 0;
+  let durationSeconds = 0;
+  let durationCount = 0;
   let creditsSpent = 0;
   let qualifiedScoreTotal = 0;
   let qualifiedScoreCount = 0;
+  let highConfidenceQualified = 0;
 
   const attemptedLeads = new Map<string, number>();
+  const freshLeadKeys = new Set<string>();
+  const retryLeadKeys = new Set<string>();
   const daily = new Map<string, DailyPoint>();
   const hourly = new Map<number, HourlyPoint & { talkSeconds: number; talkCount: number }>();
   const weekly = new Map<string, { name: string; connected: number; totalCalls: number; rate: number }>();
@@ -375,6 +434,18 @@ function aggregate(records: AnalyticsRecord[], campaigns: CampaignRecord[], rang
   const outcomes = new Map<string, number>();
   const uncertainReasons = new Map<string, number>();
   const notInterestedReasons = new Map<string, number>();
+  const segmentStats = {
+    fresh: { totalCalls: 0, connected: 0, qualified: 0, uncertain: 0 },
+    retry: { totalCalls: 0, connected: 0, qualified: 0, uncertain: 0 },
+  };
+  const attemptStats = Array.from({ length: 8 }, (_, index) => ({
+    attemptNumber: index + 1,
+    uniqueLeadKeys: new Set<string>(),
+    totalCalls: 0,
+    connected: 0,
+    qualified: 0,
+    uncertain: 0,
+  }));
 
   const timestamps = records.map(getRecordMs).filter((value): value is number => value !== null);
 
@@ -408,31 +479,53 @@ function aggregate(records: AnalyticsRecord[], campaigns: CampaignRecord[], rang
     const local = formatInTimezone(new Date(ms), range.timezone);
     const day = local.date;
     const week = localWeekKey(new Date(ms), range.timezone);
-    const leadKey = record.contact_id || record.phone_number || record.call_id || "unknown";
+    const leadKey = record.leadKey;
+    const attemptBucket = Math.min(Math.max(record.attemptNumber, 1), 8);
+    const segment = record.attemptNumber === 1 ? segmentStats.fresh : segmentStats.retry;
+    const attemptRow = attemptStats[attemptBucket - 1];
 
     increment(attemptedLeads, leadKey);
+    if (record.attemptNumber === 1) freshLeadKeys.add(leadKey);
+    else retryLeadKeys.add(leadKey);
     creditsSpent += asNumber(asRecord(record.billing_data).credits_used);
     increment(verdicts, labelize(verdict));
     increment(outcomes, connectedCall ? "Connected" : "Did Not Connect");
+    segment.totalCalls += 1;
+    attemptRow.uniqueLeadKeys.add(leadKey);
+    attemptRow.totalCalls += 1;
 
     if (duration > 0 && connectedCall) {
       talkSeconds += duration;
       talkCount += 1;
     }
+    if (duration > 0) {
+      durationSeconds += duration;
+      durationCount += 1;
+    }
 
-    if (connectedCall) connected += 1;
-    else didNotConnect += 1;
+    if (connectedCall) {
+      connected += 1;
+      segment.connected += 1;
+      attemptRow.connected += 1;
+    } else didNotConnect += 1;
 
     if (verdict === "qualified") {
       qualified += 1;
+      segment.qualified += 1;
+      attemptRow.qualified += 1;
       const score = asNumber(discoveries.qualified_confidence_score || analytics.confidence_score);
       if (score > 0) {
         qualifiedScoreTotal += score;
         qualifiedScoreCount += 1;
       }
+      if (score > 80) {
+        highConfidenceQualified += 1;
+      }
     } else if (verdict === "uncertain" || verdict === "callback") {
       if (verdict === "callback") callback += 1;
       else uncertain += 1;
+      segment.uncertain += 1;
+      attemptRow.uncertain += 1;
       const reason =
         asString(discoveries.uncertain_tag) ||
         (analytics.voicemail === true ? "Voicemail" : "") ||
@@ -518,6 +611,42 @@ function aggregate(records: AnalyticsRecord[], campaigns: CampaignRecord[], rang
     avgTalkTimeSeconds: hourTalkCount > 0 ? Math.round(hourTalkSeconds / hourTalkCount) : null,
   }));
 
+  const leadSegments: LeadSegment[] = [
+    {
+      name: "Fresh leads",
+      uniqueLeads: freshLeadKeys.size,
+      totalCalls: segmentStats.fresh.totalCalls,
+      connected: segmentStats.fresh.connected,
+      qualified: segmentStats.fresh.qualified,
+      uncertain: segmentStats.fresh.uncertain,
+      connectivityRate: percent(segmentStats.fresh.connected, segmentStats.fresh.totalCalls),
+      qualificationRate: percent(segmentStats.fresh.qualified, segmentStats.fresh.connected),
+    },
+    {
+      name: "Retry leads",
+      uniqueLeads: retryLeadKeys.size,
+      totalCalls: segmentStats.retry.totalCalls,
+      connected: segmentStats.retry.connected,
+      qualified: segmentStats.retry.qualified,
+      uncertain: segmentStats.retry.uncertain,
+      connectivityRate: percent(segmentStats.retry.connected, segmentStats.retry.totalCalls),
+      qualificationRate: percent(segmentStats.retry.qualified, segmentStats.retry.connected),
+    },
+  ];
+
+  const attemptPerformance: AttemptPerformance[] = attemptStats.map((row) => ({
+    attemptNumber: row.attemptNumber,
+    label: row.attemptNumber === 1 ? "Call 1" : `Retry ${row.attemptNumber - 1}`,
+    schedule: attemptSchedules[row.attemptNumber - 1],
+    uniqueLeads: row.uniqueLeadKeys.size,
+    totalCalls: row.totalCalls,
+    connected: row.connected,
+    qualified: row.qualified,
+    uncertain: row.uncertain,
+    connectivityRate: percent(row.connected, row.totalCalls),
+    qualificationRate: percent(row.qualified, row.connected),
+  }));
+
   const totalLeadsReceived =
     campaigns
       .filter((campaign) => {
@@ -545,6 +674,8 @@ function aggregate(records: AnalyticsRecord[], campaigns: CampaignRecord[], rang
       avgTalkTimeSeconds: talkCount > 0 ? Math.round(talkSeconds / talkCount) : null,
       creditsSpent: Math.round(creditsSpent * 100) / 100,
       avgQualifiedScore: qualifiedScoreCount > 0 ? Math.round(qualifiedScoreTotal / qualifiedScoreCount) : 0,
+      highConfidenceQualifiedLeads: highConfidenceQualified,
+      highConfidenceQualifiedRate: percent(highConfidenceQualified, qualified),
     },
     funnel: {
       totalCalls: records.length,
@@ -553,6 +684,7 @@ function aggregate(records: AnalyticsRecord[], campaigns: CampaignRecord[], rang
       notInterested,
       uncertain: uncertain + callback,
       qualified,
+      highConfidenceQualified,
     },
     daily: normalizedDaily,
     hourly: normalizedHourly,
@@ -578,11 +710,21 @@ function aggregate(records: AnalyticsRecord[], campaigns: CampaignRecord[], rang
       .filter((row) => row.totalCalls > 0)
       .sort((a, b) => b.totalCalls - a.totalCalls)
       .slice(0, 5),
-    agentTelemetry: [
-      { name: "Calls with priced token telemetry", value: records.filter((record) => record.token_cost_summary).length },
-      { name: "Calls with provider status", value: records.filter((record) => record.provider_call_status).length },
-      { name: "Calls with billing data", value: records.filter((record) => record.billing_data).length },
-      { name: "Connected calls over 30 seconds", value: records.filter((record) => isConnected(record) && asNumber(record.duration_seconds) >= 30).length },
+    highestQualificationHours: normalizedHourly
+      .filter((row) => row.connected >= 10)
+      .sort((a, b) => b.qualificationRate - a.qualificationRate || b.qualified - a.qualified)
+      .slice(0, 5),
+    highestUncertainHours: normalizedHourly
+      .filter((row) => row.connected >= 10)
+      .sort((a, b) => percent(b.uncertain, b.connected) - percent(a.uncertain, a.connected) || b.uncertain - a.uncertain)
+      .slice(0, 5),
+    leadSegments,
+    attemptPerformance,
+    operationalMetrics: [
+      { name: "Credits consumed", value: Math.round(creditsSpent * 100) / 100 },
+      { name: "Credits per call", value: records.length > 0 ? Math.round((creditsSpent / records.length) * 100) / 100 : 0 },
+      { name: "Avg call duration (sec)", value: durationCount > 0 ? Math.round(durationSeconds / durationCount) : 0 },
+      { name: "Avg connected duration (sec)", value: talkCount > 0 ? Math.round(talkSeconds / talkCount) : 0 },
     ],
     savedLeadsImpact: [
       { name: "Qualified or interested leads", value: qualified },
@@ -603,9 +745,10 @@ export async function GET(request: NextRequest) {
     const allRecords = Array.isArray(analyticsResponse.analytics)
       ? (analyticsResponse.analytics as AnalyticsRecord[])
       : [];
+    const enrichedRecords = enrichRecordsWithAttempts(allRecords);
     const campaigns = Array.isArray(campaignPayload) ? (campaignPayload as CampaignRecord[]) : [];
-    const records = recordsInWindow(allRecords, range.startUtcMs, range.endUtcMs, range);
-    const previousRecords = recordsInWindow(allRecords, range.previousStartUtcMs, range.previousEndUtcMs, range);
+    const records = recordsInWindow(enrichedRecords, range.startUtcMs, range.endUtcMs, range);
+    const previousRecords = recordsInWindow(enrichedRecords, range.previousStartUtcMs, range.previousEndUtcMs, range);
     const current = aggregate(records, campaigns, range);
     const previous = aggregate(previousRecords, [], range);
 
@@ -648,7 +791,11 @@ export async function GET(request: NextRequest) {
       weeklyConnectivity: current.weeklyConnectivity,
       bestConnectivityHours: current.bestConnectivityHours,
       highestVolumeHours: current.highestVolumeHours,
-      agentTelemetry: current.agentTelemetry,
+      highestQualificationHours: current.highestQualificationHours,
+      highestUncertainHours: current.highestUncertainHours,
+      leadSegments: current.leadSegments,
+      attemptPerformance: current.attemptPerformance,
+      operationalMetrics: current.operationalMetrics,
       savedLeadsImpact: current.savedLeadsImpact,
     };
 

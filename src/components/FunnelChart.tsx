@@ -10,24 +10,30 @@ type FunnelNodeProps = {
   value: number;
   color: string;
   denominator: number;
+  note?: string;
 };
 
-function FunnelNode({ x, y, w, h, label, value, color, denominator }: FunnelNodeProps) {
+function FunnelNode({ x, y, w, h, label, value, color, denominator, note }: FunnelNodeProps) {
   return (
     <g>
       <rect x={x} y={y} width={w} height={h} fill={color} rx={4} />
-      <text x={x + w / 2} y={y + h / 2 - 6} fill="#fff" fontSize={11} fontWeight="bold" textAnchor="middle" dominantBaseline="middle">
+      <text x={x + w / 2} y={y + h / 2 - (note ? 11 : 6)} fill="#fff" fontSize={11} fontWeight="bold" textAnchor="middle" dominantBaseline="middle">
         {label}
       </text>
-      <text x={x + w / 2} y={y + h / 2 + 8} fill="rgba(255,255,255,0.7)" fontSize={9} textAnchor="middle" dominantBaseline="middle">
+      <text x={x + w / 2} y={y + h / 2 + (note ? 3 : 8)} fill="rgba(255,255,255,0.7)" fontSize={9} textAnchor="middle" dominantBaseline="middle">
         {value.toLocaleString()} ({Math.round((value / (denominator || 1)) * 100)}%)
       </text>
+      {note ? (
+        <text x={x + w / 2} y={y + h / 2 + 16} fill="rgba(255,255,255,0.72)" fontSize={8} textAnchor="middle" dominantBaseline="middle">
+          {note}
+        </text>
+      ) : null}
     </g>
   );
 }
 
 export default function FunnelChart({ data, uncertainReasons = [] }: { data: DashboardData["funnel"], uncertainReasons?: { name: string, value: number }[] }) {
-  const { totalCalls, connected, didNotConnect, notInterested, qualified } = data;
+  const { totalCalls, connected, didNotConnect, notInterested, qualified, highConfidenceQualified } = data;
   const safeTotalCalls = Math.max(totalCalls, 1);
 
   // Extract the 3 sub-buckets for Uncertain
@@ -43,7 +49,7 @@ export default function FunnelChart({ data, uncertainReasons = [] }: { data: Das
   // Fallback to data.uncertain if empty
   const uncertain = (uncDisconnected + uncVoicemail + uncOther) || data.uncertain;
 
-  const width = 940;
+  const width = 1160;
   const height = 280; // Reduced height by ~50%
   
   // Dimensions
@@ -75,8 +81,10 @@ export default function FunnelChart({ data, uncertainReasons = [] }: { data: Das
   const hUncVoice = scale(uncVoicemail || (uncertain * 0.2));
   const hUncOther = scale(uncOther || (uncertain * 0.2));
   const hQual = scale(qualified);
+  const hHighConfidence = Math.max(scale(highConfidenceQualified), 42);
 
   const x3 = x2 + boxWidth + 150; 
+  const x4 = x3 + boxWidth + 140;
   
   const y3NI = y2Conn;
   const y3UncDisc = y3NI + hNI + gap;
@@ -95,6 +103,7 @@ export default function FunnelChart({ data, uncertainReasons = [] }: { data: Das
   const propUncVoice = ((uncVoicemail || uncertain * 0.2) / sumStage3) * hConnected;
   const propUncOther = ((uncOther || uncertain * 0.2) / sumStage3) * hConnected;
   const propQual = (qualified / sumStage3) * hConnected;
+  const propHighConfidence = qualified > 0 ? (highConfidenceQualified / qualified) * hQual : 0;
 
   const leftY2UncDisc = y2Conn + propNI;
   const leftY2UncVoice = leftY2UncDisc + propUncDisc;
@@ -120,6 +129,9 @@ export default function FunnelChart({ data, uncertainReasons = [] }: { data: Das
       <path d={createPath(x2 + boxWidth, leftY2UncVoice, propUncVoice, x3, y3UncVoice, hUncVoice)} fill="#ff9100" opacity={0.15} />
       <path d={createPath(x2 + boxWidth, leftY2UncOther, propUncOther, x3, y3UncOther, hUncOther)} fill="#ffaa00" opacity={0.1} />
       <path d={createPath(x2 + boxWidth, leftY2Qual, propQual, x3, y3Qual, hQual)} fill="#00d26a" opacity={0.2} />
+      {highConfidenceQualified > 0 ? (
+        <path d={createPath(x3 + boxWidth, y3Qual, Math.max(propHighConfidence, 4), x4, y3Qual, hHighConfidence)} fill="#00d26a" opacity={0.16} />
+      ) : null}
 
       {/* Stage 1 */}
       <FunnelNode x={x1} y={y1} w={boxWidth} h={hTotal} label="Total Calls" value={totalCalls} color="#FFC700" denominator={totalCalls} />
@@ -134,6 +146,7 @@ export default function FunnelChart({ data, uncertainReasons = [] }: { data: Das
       <FunnelNode x={x3} y={y3UncVoice} w={boxWidth} h={hUncVoice} label="Voicemail" value={uncVoicemail || uncertain * 0.2} color="#ff9100" denominator={sumStage3} />
       <FunnelNode x={x3} y={y3UncOther} w={boxWidth} h={hUncOther} label="Other Uncertain" value={uncOther || uncertain * 0.2} color="#ffaa00" denominator={sumStage3} />
       <FunnelNode x={x3} y={y3Qual} w={boxWidth} h={hQual} label="Qualified" value={qualified} color="#00d26a" denominator={sumStage3} />
+      <FunnelNode x={x4} y={y3Qual} w={boxWidth} h={hHighConfidence} label="High Score Leads" value={highConfidenceQualified} color="#008f4a" denominator={qualified || 1} note="score > 80" />
     </svg>
   );
 }

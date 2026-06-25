@@ -19,8 +19,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { ArrowDownRight, ArrowUpRight, Minus, Sparkles } from "lucide-react";
-import { DashboardData, DashboardPage, HourlyPoint, MetricPoint } from "@/utils/fetchData";
+import { ArrowDownRight, ArrowUpRight, Info, Minus, Sparkles } from "lucide-react";
+import { AttemptPerformance, DashboardData, DashboardPage, HourlyPoint, MetricPoint } from "@/utils/fetchData";
 import FunnelChart from "./FunnelChart";
 import HorizontalBarChart from "./HorizontalBarChart";
 
@@ -41,6 +41,11 @@ const chartAnimation = false;
 const formatNumber = (value: number) => value.toLocaleString("en-IN");
 
 const formatPercent = (value: number) => `${value.toFixed(value % 1 === 0 ? 0 : 1)}%`;
+
+const formatDecimal = (value: number) =>
+  value.toLocaleString("en-IN", {
+    maximumFractionDigits: 2,
+  });
 
 const formatDuration = (seconds: number | null) => {
   if (seconds === null) return "No data";
@@ -121,6 +126,23 @@ function MetricCard({
   );
 }
 
+function InfoTip({ text }: { text: string }) {
+  return (
+    <span className="group relative inline-flex">
+      <button
+        type="button"
+        aria-label={text}
+        className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-card-border bg-[#101010] text-muted transition hover:border-monade hover:text-monade focus:outline-none focus:ring-2 focus:ring-monade/40"
+      >
+        <Info size={13} />
+      </button>
+      <span className="pointer-events-none absolute right-0 top-8 z-20 hidden w-[280px] rounded-lg border border-card-border bg-[#101010] p-3 text-left text-xs leading-relaxed text-foreground shadow-xl group-hover:block group-focus-within:block">
+        {text}
+      </span>
+    </span>
+  );
+}
+
 function Panel({
   title,
   children,
@@ -170,8 +192,29 @@ function PieBlock({ data }: { data: MetricPoint[] }) {
   );
 }
 
-function TopHours({ rows, mode }: { rows: HourlyPoint[]; mode: "connectivity" | "volume" }) {
+function TopHours({ rows, mode }: { rows: HourlyPoint[]; mode: "connectivity" | "volume" | "qualification" | "uncertain" }) {
   if (!rows.length) return <EmptyState />;
+
+  const valueForMode = (row: HourlyPoint) => {
+    if (mode === "connectivity") return formatPercent(row.connectivityRate);
+    if (mode === "qualification") return formatPercent(row.qualificationRate);
+    if (mode === "uncertain") return formatPercent(row.connected > 0 ? (row.uncertain / row.connected) * 100 : 0);
+    return formatNumber(row.totalCalls);
+  };
+
+  const labelForMode = {
+    connectivity: "connect",
+    volume: "calls",
+    qualification: "qualified",
+    uncertain: "uncertain",
+  }[mode];
+
+  const colorForMode = {
+    connectivity: "text-green",
+    volume: "text-monade",
+    qualification: "text-green",
+    uncertain: "text-orange",
+  }[mode];
 
   return (
     <div className="space-y-3">
@@ -184,12 +227,12 @@ function TopHours({ rows, mode }: { rows: HourlyPoint[]; mode: "connectivity" | 
               {formatNumber(row.totalCalls)} calls, {formatNumber(row.connected)} connected
             </div>
           </div>
-          <div className={mode === "connectivity" ? "text-green" : "text-monade"}>
+          <div className={colorForMode}>
             <div className="text-lg font-semibold leading-none">
-              {mode === "connectivity" ? formatPercent(row.connectivityRate) : formatNumber(row.totalCalls)}
+              {valueForMode(row)}
             </div>
             <div className="mt-1 text-right text-[11px] text-muted">
-              {mode === "connectivity" ? "connect" : "calls"}
+              {labelForMode}
             </div>
           </div>
         </div>
@@ -206,6 +249,7 @@ function Overview({ data }: { data: DashboardData }) {
         <MetricCard label="Leads Attempted" value={formatNumber(data.kpis.totalLeadsAttempted)} detail="Unique phone/contact dialed" />
         <MetricCard label="Connected" value={formatNumber(data.kpis.connectedCalls)} detail={formatPercent(data.kpis.connectivityRate)} delta={data.comparisons.connectedDeltaPct} tone="green" />
         <MetricCard label="Qualified" value={formatNumber(data.kpis.qualifiedLeads)} detail={`${formatPercent(data.kpis.qualificationRate)} of connected`} delta={data.comparisons.qualifiedDeltaPct} tone="green" />
+        <MetricCard label="High Score Leads" value={formatNumber(data.kpis.highConfidenceQualifiedLeads)} detail={`${formatPercent(data.kpis.highConfidenceQualifiedRate)} of qualified, score > 80`} tone="green" />
         <MetricCard label="Avg Talk Time" value={formatDuration(data.kpis.avgTalkTimeSeconds)} detail="Connected calls only" tone="cyan" />
         <MetricCard label="Credits Spent" value={formatNumber(data.kpis.creditsSpent)} detail="Per-call billing rollup" tone="orange" />
       </div>
@@ -233,7 +277,7 @@ function Overview({ data }: { data: DashboardData }) {
 
       <Panel
         title="Qualification Funnel"
-        action={<span className="text-xs text-muted">Avg qualified score {data.kpis.avgQualifiedScore}%</span>}
+        action={<span className="text-xs text-muted">{formatNumber(data.kpis.highConfidenceQualifiedLeads)} high score leads · score &gt; 80</span>}
       >
         <div className="flex items-center justify-center">
           <FunnelChart data={data.funnel} uncertainReasons={data.uncertainReasons} />
@@ -292,12 +336,17 @@ function Trends({ data }: { data: DashboardData }) {
 }
 
 function Timing({ data }: { data: DashboardData }) {
+  const hourlyWithUncertainRate = data.hourly.map((row) => ({
+    ...row,
+    uncertainRate: row.connected > 0 ? Math.round((row.uncertain / row.connected) * 1000) / 10 : 0,
+  }));
+
   return (
     <>
       <div className="grid gap-4 xl:grid-cols-[1.3fr_0.7fr]">
         <Panel title="Hourly Performance">
           <ResponsiveContainer width="100%" height={380}>
-            <ComposedChart data={data.hourly}>
+            <ComposedChart data={hourlyWithUncertainRate}>
               <CartesianGrid stroke={palette.grid} vertical={false} />
               <XAxis dataKey="label" stroke={palette.muted} tick={{ fontSize: 11 }} />
               <YAxis yAxisId="calls" stroke={palette.muted} tick={{ fontSize: 11 }} />
@@ -307,6 +356,7 @@ function Timing({ data }: { data: DashboardData }) {
               <Bar yAxisId="calls" dataKey="totalCalls" name="Calls" fill={palette.cyan} radius={[4, 4, 0, 0]} isAnimationActive={chartAnimation} />
               <Line yAxisId="rate" type="monotone" dataKey="connectivityRate" name="Connectivity" stroke={palette.green} strokeWidth={2} dot={false} isAnimationActive={chartAnimation} />
               <Line yAxisId="rate" type="monotone" dataKey="qualificationRate" name="Qualification" stroke={palette.yellow} strokeWidth={2} dot={false} isAnimationActive={chartAnimation} />
+              <Line yAxisId="rate" type="monotone" dataKey="uncertainRate" name="Uncertain" stroke={palette.orange} strokeWidth={2} dot={false} isAnimationActive={chartAnimation} />
             </ComposedChart>
           </ResponsiveContainer>
         </Panel>
@@ -317,6 +367,12 @@ function Timing({ data }: { data: DashboardData }) {
           </Panel>
           <Panel title="Highest Volume Hours">
             <TopHours rows={data.highestVolumeHours} mode="volume" />
+          </Panel>
+          <Panel title="Highest Qualification Hours">
+            <TopHours rows={data.highestQualificationHours} mode="qualification" />
+          </Panel>
+          <Panel title="Highest Uncertain Hours">
+            <TopHours rows={data.highestUncertainHours} mode="uncertain" />
           </Panel>
         </div>
       </div>
@@ -346,7 +402,7 @@ function Qualification({ data }: { data: DashboardData }) {
         <MetricCard label="Qualified Leads" value={formatNumber(data.kpis.qualifiedLeads)} detail={`${formatPercent(data.kpis.qualificationRate)} of connected`} tone="green" />
         <MetricCard label="Uncertain" value={formatNumber(data.kpis.uncertainLeads)} detail={`${formatNumber(data.kpis.callbackLeads)} callbacks tagged`} tone="orange" />
         <MetricCard label="Not Interested" value={formatNumber(data.kpis.notInterestedCalls)} detail={`${formatPercent(data.kpis.notInterestedRate)} of connected`} tone="red" />
-        <MetricCard label="Avg Qualified Score" value={`${data.kpis.avgQualifiedScore}%`} detail="Post-call confidence" tone="cyan" />
+        <MetricCard label="High Score Leads" value={formatNumber(data.kpis.highConfidenceQualifiedLeads)} detail={`${formatPercent(data.kpis.highConfidenceQualifiedRate)} of qualified, score > 80`} tone="cyan" />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[0.75fr_1.25fr]">
@@ -360,7 +416,10 @@ function Qualification({ data }: { data: DashboardData }) {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <Panel title="Why Leads Were Not Interested">
+        <Panel
+          title="Why Leads Were Not Interested"
+          action={<InfoTip text="These reasons come from the structured post-processing tags currently stored for each call. More granular metadata, such as other course names, fee objections, EMI concerns, or alternate enrollment status, will need those fields to be extracted and saved during post-processing." />}
+        >
           <HorizontalBarChart data={data.notInterestedReasons} colors={[palette.red, palette.orange, palette.yellow, palette.cyan, palette.muted]} valueMode="absolute" />
         </Panel>
 
@@ -373,17 +432,79 @@ function Qualification({ data }: { data: DashboardData }) {
 }
 
 function Operations({ data }: { data: DashboardData }) {
+  const metricValue = (name: string) => data.operationalMetrics.find((item) => item.name === name)?.value || 0;
+  const attemptInfo =
+    "SARA makes the first call within 3-4 minutes of lead arrival. Retry 1 is after 1 hour, Retry 2 after 2 hours, Retry 3 after 3 hours, Retry 4 next day around 6 PM, Retry 5 next day 7-8 PM, Retry 6 on the third day around 6 PM, and Retry 7 around 7-8 PM. Calling is restricted to 9 AM-9 PM as per TRAI guidelines.";
+
   return (
     <>
-      <div className="grid gap-4 xl:grid-cols-2">
-        <Panel title="Retry Bucket Breakdown">
-          <HorizontalBarChart data={data.retryBuckets} colors={[palette.green, palette.yellow, palette.orange, palette.red, palette.cyan, palette.violet]} valueMode="absolute" />
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <MetricCard label="Credits / Call" value={formatDecimal(metricValue("Credits per call"))} detail={`${formatNumber(data.kpis.creditsSpent)} total credits`} tone="orange" />
+        <MetricCard label="Avg Call Duration" value={formatDuration(metricValue("Avg call duration (sec)"))} detail="All calls with duration" tone="cyan" />
+        <MetricCard label="Avg Connected Duration" value={formatDuration(metricValue("Avg connected duration (sec)"))} detail="Connected calls only" tone="green" />
+        <MetricCard label="Unique Leads" value={formatNumber(data.kpis.totalLeadsAttempted)} detail={`${formatNumber(data.kpis.totalCalls)} total call attempts`} />
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
+        <Panel
+          title="Fresh Vs Retry Leads"
+          action={<InfoTip text="Fresh leads are leads where the selected call is the first SARA attempt. Retry leads are leads where the selected call is attempt 2 or later. Qualification is calculated over connected calls inside the selected date and time window." />}
+        >
+          <div className="space-y-3">
+            {data.leadSegments.map((segment) => (
+              <div key={segment.name} className="rounded-lg border border-card-border bg-[#101010] p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="text-sm font-semibold text-foreground">{segment.name}</div>
+                    <div className="mt-1 text-xs text-muted">
+                      {formatNumber(segment.uniqueLeads)} unique leads · {formatNumber(segment.totalCalls)} calls
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-lg font-semibold text-green">{formatPercent(segment.qualificationRate)}</div>
+                    <div className="mt-1 text-[11px] text-muted">qualification</div>
+                  </div>
+                </div>
+                <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
+                  <div className="rounded-md bg-card-bg p-2">
+                    <div className="text-muted">Connected</div>
+                    <div className="mt-1 font-semibold text-foreground">{formatNumber(segment.connected)} ({formatPercent(segment.connectivityRate)})</div>
+                  </div>
+                  <div className="rounded-md bg-card-bg p-2">
+                    <div className="text-muted">Qualified</div>
+                    <div className="mt-1 font-semibold text-green">{formatNumber(segment.qualified)}</div>
+                  </div>
+                  <div className="rounded-md bg-card-bg p-2">
+                    <div className="text-muted">Uncertain</div>
+                    <div className="mt-1 font-semibold text-orange">{formatNumber(segment.uncertain)}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </Panel>
 
-        <Panel title="Platform Telemetry Coverage">
-          <HorizontalBarChart data={data.agentTelemetry} colors={[palette.cyan, palette.green, palette.yellow, palette.orange]} valueMode="absolute" />
+        <Panel title="Qualification By Call Attempt" action={<InfoTip text={attemptInfo} />}>
+          {data.attemptPerformance.some((row) => row.totalCalls > 0) ? (
+            <ResponsiveContainer width="100%" height={320}>
+              <BarChart data={data.attemptPerformance}>
+                <CartesianGrid stroke={palette.grid} vertical={false} />
+                <XAxis dataKey="label" stroke={palette.muted} tick={{ fontSize: 11 }} />
+                <YAxis stroke={palette.muted} tick={{ fontSize: 11 }} />
+                <Tooltip contentStyle={tooltipStyle} />
+                <Legend wrapperStyle={{ color: palette.muted, fontSize: 12 }} />
+                <Bar dataKey="connected" name="Connected" fill={palette.cyan} isAnimationActive={chartAnimation} />
+                <Bar dataKey="qualified" name="Qualified" fill={palette.green} isAnimationActive={chartAnimation} />
+                <Bar dataKey="uncertain" name="Uncertain" fill={palette.orange} isAnimationActive={chartAnimation} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : <EmptyState />}
         </Panel>
       </div>
+
+      <Panel title="Attempt-Level Detail" action={<InfoTip text="This table separates the first call from seven retries. Each row uses the selected dashboard date, time, and timezone filters." />}>
+        <AttemptTable rows={data.attemptPerformance} />
+      </Panel>
 
       <Panel title="Weekly Connectivity">
         {data.weeklyConnectivity.length ? (
@@ -399,6 +520,41 @@ function Operations({ data }: { data: DashboardData }) {
         ) : <EmptyState />}
       </Panel>
     </>
+  );
+}
+
+function AttemptTable({ rows }: { rows: AttemptPerformance[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[860px] border-collapse text-sm">
+        <thead>
+          <tr className="border-b border-card-border text-left text-[11px] uppercase tracking-wider text-muted">
+            <th className="py-3 pr-4 font-semibold">Attempt</th>
+            <th className="py-3 pr-4 font-semibold">Schedule</th>
+            <th className="py-3 pr-4 text-right font-semibold">Unique Leads</th>
+            <th className="py-3 pr-4 text-right font-semibold">Total Calls</th>
+            <th className="py-3 pr-4 text-right font-semibold">Connected</th>
+            <th className="py-3 pr-4 text-right font-semibold">Qualified</th>
+            <th className="py-3 pr-4 text-right font-semibold">Connectivity</th>
+            <th className="py-3 text-right font-semibold">Qualification</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.attemptNumber} className="border-b border-card-border/70 text-foreground last:border-b-0">
+              <td className="py-3 pr-4 font-semibold">{row.label}</td>
+              <td className="py-3 pr-4 text-xs text-muted">{row.schedule}</td>
+              <td className="py-3 pr-4 text-right">{formatNumber(row.uniqueLeads)}</td>
+              <td className="py-3 pr-4 text-right">{formatNumber(row.totalCalls)}</td>
+              <td className="py-3 pr-4 text-right">{formatNumber(row.connected)}</td>
+              <td className="py-3 pr-4 text-right text-green">{formatNumber(row.qualified)}</td>
+              <td className="py-3 pr-4 text-right">{formatPercent(row.connectivityRate)}</td>
+              <td className="py-3 text-right">{formatPercent(row.qualificationRate)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
