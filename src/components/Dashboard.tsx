@@ -202,10 +202,12 @@ function TopHours({
   rows,
   mode,
   totalCalls = 0,
+  compact = false,
 }: {
   rows: HourlyPoint[];
   mode: "connectivity" | "volume" | "qualification" | "uncertain";
   totalCalls?: number;
+  compact?: boolean;
 }) {
   if (!rows.length) return <EmptyState />;
 
@@ -230,14 +232,16 @@ function TopHours({
     uncertain: "text-orange",
   }[mode];
 
+  const visibleRows = compact ? rows.slice(0, 3) : rows;
+
   return (
-    <div className="space-y-3">
-      {rows.map((row, index) => (
-        <div key={row.hour} className="grid grid-cols-[44px_1fr_auto] items-center gap-3 rounded-lg bg-[#101010] px-3 py-3">
+    <div className={compact ? "space-y-2" : "space-y-3"}>
+      {visibleRows.map((row, index) => (
+        <div key={row.hour} className={`grid grid-cols-[38px_1fr_auto] items-center gap-3 rounded-lg bg-[#101010] px-3 ${compact ? "py-2" : "py-3"}`}>
           <div className="text-sm font-semibold text-muted">#{index + 1}</div>
           <div>
             <div className="text-sm font-semibold text-foreground">{row.label}</div>
-            <div className="mt-1 text-xs text-muted">
+            <div className={`text-xs text-muted ${compact ? "mt-0.5" : "mt-1"}`}>
               {formatNumber(row.totalCalls)} calls, {formatNumber(row.connected)} connected
             </div>
           </div>
@@ -361,7 +365,7 @@ function Timing({ data }: { data: DashboardData }) {
 
   return (
     <>
-      <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+      <div className="grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
         <Panel title="Hourly Performance" className="self-start">
           <ResponsiveContainer width="100%" height={320}>
             <ComposedChart data={hourlyWithUncertainRate}>
@@ -379,18 +383,18 @@ function Timing({ data }: { data: DashboardData }) {
           </ResponsiveContainer>
         </Panel>
 
-        <div className="grid gap-4">
+        <div className="grid gap-4 md:grid-cols-2">
           <Panel title="Best Connectivity Hours">
-            <TopHours rows={data.bestConnectivityHours} mode="connectivity" />
+            <TopHours rows={data.bestConnectivityHours} mode="connectivity" compact />
           </Panel>
           <Panel title="Highest Volume Hours">
-            <TopHours rows={data.highestVolumeHours} mode="volume" totalCalls={data.kpis.totalCalls} />
+            <TopHours rows={data.highestVolumeHours} mode="volume" totalCalls={data.kpis.totalCalls} compact />
           </Panel>
           <Panel title="Highest Qualification Hours">
-            <TopHours rows={data.highestQualificationHours} mode="qualification" />
+            <TopHours rows={data.highestQualificationHours} mode="qualification" compact />
           </Panel>
           <Panel title="Highest Uncertain Hours">
-            <TopHours rows={data.highestUncertainHours} mode="uncertain" />
+            <TopHours rows={data.highestUncertainHours} mode="uncertain" compact />
           </Panel>
         </div>
       </div>
