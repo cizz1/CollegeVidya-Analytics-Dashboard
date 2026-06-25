@@ -84,7 +84,7 @@ export default function FunnelChart({ data, uncertainReasons = [] }: { data: Das
   const hUncVoice = scale(uncVoicemail || (uncertain * 0.2));
   const hUncOther = scale(uncOther || (uncertain * 0.2));
   const hQual = scale(qualified);
-  const hHighConfidence = Math.max(scale(highConfidenceQualified), 42);
+  const hHighConfidence = highConfidenceQualified > 0 ? Math.max(scale(highConfidenceQualified), 42) : 42;
 
   const x3 = x2 + boxWidth + 150; 
   const x4 = x3 + boxWidth + 140;
@@ -94,6 +94,9 @@ export default function FunnelChart({ data, uncertainReasons = [] }: { data: Das
   const y3UncVoice = y3UncDisc + hUncDisc + gap;
   const y3UncOther = y3UncVoice + hUncVoice + gap;
   const y3Qual = y3UncOther + hUncOther + gap;
+  const highConfidenceSourceHeight = qualified > 0 ? Math.max((highConfidenceQualified / qualified) * hQual, 4) : 0;
+  const highConfidenceSourceY = y3Qual + Math.max((hQual - highConfidenceSourceHeight) / 2, 0);
+  const highConfidenceY = y3Qual + Math.max((hQual - hHighConfidence) / 2, 0);
 
   // Proportional heights for link start points to prevent overflowing parent boxes
   const sumStage2 = connected + didNotConnect || 1;
@@ -106,8 +109,6 @@ export default function FunnelChart({ data, uncertainReasons = [] }: { data: Das
   const propUncVoice = ((uncVoicemail || uncertain * 0.2) / sumStage3) * hConnected;
   const propUncOther = ((uncOther || uncertain * 0.2) / sumStage3) * hConnected;
   const propQual = (qualified / sumStage3) * hConnected;
-  const propHighConfidence = qualified > 0 ? (highConfidenceQualified / qualified) * hQual : 0;
-
   const leftY2UncDisc = y2Conn + propNI;
   const leftY2UncVoice = leftY2UncDisc + propUncDisc;
   const leftY2UncOther = leftY2UncVoice + propUncVoice;
@@ -133,7 +134,7 @@ export default function FunnelChart({ data, uncertainReasons = [] }: { data: Das
       <path d={createPath(x2 + boxWidth, leftY2UncOther, propUncOther, x3, y3UncOther, hUncOther)} fill="#ffaa00" opacity={0.1} />
       <path d={createPath(x2 + boxWidth, leftY2Qual, propQual, x3, y3Qual, hQual)} fill="#00d26a" opacity={0.2} />
       {highConfidenceQualified > 0 ? (
-        <path d={createPath(x3 + boxWidth, y3Qual, Math.max(propHighConfidence, 4), x4, y3Qual, hHighConfidence)} fill="#00d26a" opacity={0.16} />
+        <path d={createPath(x3 + boxWidth, highConfidenceSourceY, highConfidenceSourceHeight, x4, highConfidenceY, hHighConfidence)} fill="#00d26a" opacity={0.18} />
       ) : null}
 
       {/* Stage 1 */}
@@ -149,7 +150,7 @@ export default function FunnelChart({ data, uncertainReasons = [] }: { data: Das
       <FunnelNode x={x3} y={y3UncVoice} w={boxWidth} h={hUncVoice} label="Voicemail" value={uncVoicemail || uncertain * 0.2} color="#ff9100" denominator={sumStage3} />
       <FunnelNode x={x3} y={y3UncOther} w={boxWidth} h={hUncOther} label="Other Uncertain" value={uncOther || uncertain * 0.2} color="#ffaa00" denominator={sumStage3} />
       <FunnelNode x={x3} y={y3Qual} w={boxWidth} h={hQual} label="Qualified" value={qualified} color="#00d26a" denominator={sumStage3} />
-      <FunnelNode x={x4} y={y3Qual} w={boxWidth} h={hHighConfidence} label="High Score Leads" value={highConfidenceQualified} color="#008f4a" denominator={qualified || 1} note="score > 80" />
+      <FunnelNode x={x4} y={highConfidenceY} w={boxWidth} h={hHighConfidence} label="High Score Leads" value={highConfidenceQualified} color="#008f4a" denominator={qualified || 1} note="score > 80" />
     </svg>
   );
 }

@@ -223,7 +223,8 @@ const emptyData: DashboardData = {
   savedLeadsImpact: [],
 };
 
-const BROWSER_CACHE_PREFIX = "cv-dashboard:";
+const DASHBOARD_CACHE_VERSION = "2026-06-25-retry-v2";
+const BROWSER_CACHE_PREFIX = `cv-dashboard:${DASHBOARD_CACHE_VERSION}:`;
 const LIVE_BROWSER_CACHE_TTL_MS = 10 * 60 * 1000;
 const HISTORICAL_BROWSER_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -345,6 +346,7 @@ const normalizeDashboardData = (data: Partial<DashboardData>): DashboardData => 
 export const fetchDashboardData = async (filters: DashboardFilters): Promise<DashboardData> => {
   const params = new URLSearchParams();
   params.set("preset", filters.preset);
+  params.set("schema", DASHBOARD_CACHE_VERSION);
   params.set("timezone", filters.timezone);
   params.set("startTime", filters.startTime);
   params.set("endTime", filters.endTime);
