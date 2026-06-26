@@ -52,15 +52,15 @@ export default function FunnelChart({ data, uncertainReasons = [] }: { data: Das
   // Fallback to data.uncertain if empty
   const uncertain = (uncDisconnected + uncVoicemail + uncOther) || data.uncertain;
 
-  const width = 1160;
-  const height = 280; // Reduced height by ~50%
+  const width = 1300;
+  const height = 340;
   
   // Dimensions
   const boxWidth = 200;
   const gap = 4;
   const startX = 20;
-  const totalY = 15;
-  const maxH = height - 40; 
+  const totalY = 20;
+  const maxH = height - 80; 
 
   // Calculate Heights based on values
   const scale = (val: number) => Math.max((val / safeTotalCalls) * maxH, 32); // min 32px for tight stacking

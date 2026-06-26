@@ -299,8 +299,8 @@ function Overview({ data }: { data: DashboardData }) {
         title="Qualification Funnel"
         action={<span className="text-xs text-muted">{formatNumber(data.kpis.highConfidenceQualifiedLeads)} high score leads · score &gt; 80</span>}
       >
-        <div className="max-h-[340px] overflow-auto pb-2 custom-scrollbar">
-          <div className="w-[1160px] max-w-none">
+        <div className="max-h-[390px] overflow-auto pb-2 custom-scrollbar">
+          <div className="w-[1300px] max-w-none">
             <FunnelChart data={data.funnel} uncertainReasons={data.uncertainReasons} />
           </div>
         </div>
