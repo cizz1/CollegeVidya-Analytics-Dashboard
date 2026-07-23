@@ -70,6 +70,9 @@ const USER_UID =
 const BACKEND_BASE_URL =
   process.env.COLLEGE_VIDYA_BACKEND_BASE_URL || "https://service.monade.ai/db_services";
 const RAW_CACHE_TTL_MS = 60 * 60 * 1000;
+const ANALYTICS_PAGE_LIMIT = 100;
+const MAX_ANALYTICS_PAGES = 250;
+const ATTEMPT_LOOKBACK_DAYS = 4;
 const LIVE_BROWSER_CACHE_SECONDS = 10 * 60;
 const LIVE_RESPONSE_CACHE_SECONDS = 10 * 60;
 const LIVE_RESPONSE_STALE_SECONDS = 60 * 60;
@@ -77,14 +80,10 @@ const HISTORICAL_BROWSER_CACHE_SECONDS = 60 * 60;
 const HISTORICAL_RESPONSE_CACHE_SECONDS = 12 * 60 * 60;
 const HISTORICAL_RESPONSE_STALE_SECONDS = 7 * 24 * 60 * 60;
 
-let rawCache:
-  | {
-      expiresAt: number;
-      analyticsPayload: unknown;
-      campaignPayload: unknown;
-    }
-  | null = null;
-let rawCachePromise: Promise<{ analyticsPayload: unknown; campaignPayload: unknown }> | null = null;
+const analyticsRangeCache = new Map<string, { expiresAt: number; records: AnalyticsRecord[] }>();
+const analyticsRangePromises = new Map<string, Promise<AnalyticsRecord[]>>();
+let campaignCache: { expiresAt: number; campaigns: CampaignRecord[] } | null = null;
+let campaignCachePromise: Promise<CampaignRecord[]> | null = null;
 
 const asRecord = (value: unknown): JsonRecord =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : {};
@@ -356,6 +355,7 @@ async function backendGet(path: string) {
 
   const response = await fetch(`${BACKEND_BASE_URL}${path}`, {
     headers: {
+      authorization: `Bearer ${apiKey}`,
       "x-api-key": apiKey,
       accept: "application/json",
     },
@@ -370,31 +370,91 @@ async function backendGet(path: string) {
   return response.json();
 }
 
-async function getBackendData() {
+const buildQuery = (params: Record<string, string | number>) => {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    search.set(key, String(value));
+  }
+  return search.toString();
+};
+
+async function getAnalyticsRecords(fromMs: number, toMs: number) {
   const now = Date.now();
-  if (rawCache && rawCache.expiresAt > now) {
-    return rawCache;
+  const cacheKey = `${new Date(fromMs).toISOString()}:${new Date(toMs).toISOString()}`;
+  const cached = analyticsRangeCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cached.records;
   }
 
-  if (!rawCachePromise) {
-    rawCachePromise = Promise.all([
-      backendGet(`/api/analytics/user/${encodeURIComponent(USER_UID)}`),
-      backendGet(`/api/campaigns/user/${encodeURIComponent(USER_UID)}`),
-    ]).then(([analyticsPayload, campaignPayload]) => {
-      rawCache = {
-        expiresAt: Date.now() + RAW_CACHE_TTL_MS,
-        analyticsPayload,
-        campaignPayload,
-      };
-      rawCachePromise = null;
-      return rawCache;
-    }).catch((error) => {
-      rawCachePromise = null;
-      throw error;
+  const existingPromise = analyticsRangePromises.get(cacheKey);
+  if (existingPromise) return existingPromise;
+
+  const promise = (async () => {
+    const records: AnalyticsRecord[] = [];
+    let offset = 0;
+
+    for (let page = 0; page < MAX_ANALYTICS_PAGES; page += 1) {
+      const query = buildQuery({
+        limit: ANALYTICS_PAGE_LIMIT,
+        offset,
+        from: new Date(fromMs).toISOString(),
+        to: new Date(toMs).toISOString(),
+      });
+      const payload = asRecord(await backendGet(`/api/analytics/user/${encodeURIComponent(USER_UID)}?${query}`));
+      const pageRecords = Array.isArray(payload.analytics) ? (payload.analytics as AnalyticsRecord[]) : [];
+      records.push(...pageRecords);
+
+      const pagination = asRecord(payload.pagination);
+      const hasMore = typeof payload.has_more === "boolean" ? payload.has_more : Boolean(pagination.has_more);
+      const returnedCount = asNumber(payload.count || pagination.count || pageRecords.length);
+      if (!hasMore || returnedCount === 0) break;
+      offset += ANALYTICS_PAGE_LIMIT;
+    }
+
+    analyticsRangeCache.set(cacheKey, {
+      expiresAt: Date.now() + RAW_CACHE_TTL_MS,
+      records,
     });
+    analyticsRangePromises.delete(cacheKey);
+    return records;
+  })().catch((error) => {
+    analyticsRangePromises.delete(cacheKey);
+    throw error;
+  });
+
+  analyticsRangePromises.set(cacheKey, promise);
+  return promise;
+}
+
+async function getCampaigns() {
+  const now = Date.now();
+  if (campaignCache && campaignCache.expiresAt > now) {
+    return campaignCache.campaigns;
   }
 
-  return rawCachePromise;
+  if (!campaignCachePromise) {
+    campaignCachePromise = backendGet(`/api/campaigns/user/${encodeURIComponent(USER_UID)}`)
+      .then((payload) => {
+        const payloadRecord = asRecord(payload);
+        const campaigns = Array.isArray(payload)
+          ? (payload as CampaignRecord[])
+          : Array.isArray(payloadRecord.campaigns)
+            ? (payloadRecord.campaigns as CampaignRecord[])
+            : [];
+        campaignCache = {
+          expiresAt: Date.now() + RAW_CACHE_TTL_MS,
+          campaigns,
+        };
+        campaignCachePromise = null;
+        return campaigns;
+      })
+      .catch((error) => {
+        campaignCachePromise = null;
+        throw error;
+      });
+  }
+
+  return campaignCachePromise;
 }
 
 const attemptSchedules = [
@@ -739,14 +799,15 @@ function aggregate(records: EnrichedAnalyticsRecord[], campaigns: CampaignRecord
 export async function GET(request: NextRequest) {
   try {
     const range = buildRange(request);
-    const { analyticsPayload, campaignPayload } = await getBackendData();
+    const lookbackMs = ATTEMPT_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
+    const analyticsFetchStartMs = Math.max(0, Math.min(range.previousStartUtcMs, range.startUtcMs) - lookbackMs);
+    const analyticsFetchEndMs = Math.max(range.endUtcMs, range.previousEndUtcMs);
+    const [allRecords, campaigns] = await Promise.all([
+      getAnalyticsRecords(analyticsFetchStartMs, analyticsFetchEndMs),
+      getCampaigns(),
+    ]);
 
-    const analyticsResponse = asRecord(analyticsPayload);
-    const allRecords = Array.isArray(analyticsResponse.analytics)
-      ? (analyticsResponse.analytics as AnalyticsRecord[])
-      : [];
     const enrichedRecords = enrichRecordsWithAttempts(allRecords);
-    const campaigns = Array.isArray(campaignPayload) ? (campaignPayload as CampaignRecord[]) : [];
     const records = recordsInWindow(enrichedRecords, range.startUtcMs, range.endUtcMs, range);
     const previousRecords = recordsInWindow(enrichedRecords, range.previousStartUtcMs, range.previousEndUtcMs, range);
     const current = aggregate(records, campaigns, range);
