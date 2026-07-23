@@ -72,6 +72,7 @@ const BACKEND_BASE_URL =
 const RAW_CACHE_TTL_MS = 60 * 60 * 1000;
 const ANALYTICS_PAGE_LIMIT = 100;
 const MAX_ANALYTICS_PAGES = 250;
+const ANALYTICS_PAGE_CONCURRENCY = 5;
 const ATTEMPT_LOOKBACK_DAYS = 4;
 const LIVE_BROWSER_CACHE_SECONDS = 10 * 60;
 const LIVE_RESPONSE_CACHE_SECONDS = 10 * 60;
@@ -280,6 +281,18 @@ const recordsInWindow = <T extends AnalyticsRecord>(records: T[], startMs: numbe
     return ms !== null && ms >= startMs && ms <= endMs && matchesTimeWindow(record, range);
   });
 
+const dedupeRecords = (records: AnalyticsRecord[]) => {
+  const seen = new Set<string>();
+  const deduped: AnalyticsRecord[] = [];
+  for (const record of records) {
+    const key = record.call_id || `${record.created_at || record.call_started_at || "no-time"}:${getLeadKey(record)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(record);
+  }
+  return deduped;
+};
+
 const enrichRecordsWithAttempts = (records: AnalyticsRecord[]): EnrichedAnalyticsRecord[] => {
   const byLead = new Map<string, AnalyticsRecord[]>();
   for (const record of records) {
@@ -378,6 +391,42 @@ const buildQuery = (params: Record<string, string | number>) => {
   return search.toString();
 };
 
+type AnalyticsPage = {
+  records: AnalyticsRecord[];
+  count: number;
+  total: number | null;
+  hasMore: boolean;
+};
+
+async function getAnalyticsPage(fromMs: number, toMs: number, offset: number): Promise<AnalyticsPage> {
+  const query = buildQuery({
+    limit: ANALYTICS_PAGE_LIMIT,
+    offset,
+    from: new Date(fromMs).toISOString(),
+    to: new Date(toMs).toISOString(),
+  });
+  const payload = asRecord(await backendGet(`/api/analytics/user/${encodeURIComponent(USER_UID)}?${query}`));
+  const pagination = asRecord(payload.pagination);
+  const records = Array.isArray(payload.analytics) ? (payload.analytics as AnalyticsRecord[]) : [];
+  const count = asNumber(payload.count || pagination.count || records.length);
+  const totalValue = payload.total ?? pagination.total;
+  const total = totalValue === undefined || totalValue === null ? null : asNumber(totalValue);
+  const hasMore = typeof payload.has_more === "boolean" ? payload.has_more : Boolean(pagination.has_more);
+  return { records, count, total, hasMore };
+}
+
+const fetchAnalyticsOffsets = async (fromMs: number, toMs: number, offsets: number[]) => {
+  const records: AnalyticsRecord[] = [];
+  for (let index = 0; index < offsets.length; index += ANALYTICS_PAGE_CONCURRENCY) {
+    const chunk = offsets.slice(index, index + ANALYTICS_PAGE_CONCURRENCY);
+    const pages = await Promise.all(chunk.map((offset) => getAnalyticsPage(fromMs, toMs, offset)));
+    for (const page of pages) {
+      records.push(...page.records);
+    }
+  }
+  return records;
+};
+
 async function getAnalyticsRecords(fromMs: number, toMs: number) {
   const now = Date.now();
   const cacheKey = `${new Date(fromMs).toISOString()}:${new Date(toMs).toISOString()}`;
@@ -391,24 +440,23 @@ async function getAnalyticsRecords(fromMs: number, toMs: number) {
 
   const promise = (async () => {
     const records: AnalyticsRecord[] = [];
-    let offset = 0;
+    const firstPage = await getAnalyticsPage(fromMs, toMs, 0);
+    records.push(...firstPage.records);
 
-    for (let page = 0; page < MAX_ANALYTICS_PAGES; page += 1) {
-      const query = buildQuery({
-        limit: ANALYTICS_PAGE_LIMIT,
-        offset,
-        from: new Date(fromMs).toISOString(),
-        to: new Date(toMs).toISOString(),
-      });
-      const payload = asRecord(await backendGet(`/api/analytics/user/${encodeURIComponent(USER_UID)}?${query}`));
-      const pageRecords = Array.isArray(payload.analytics) ? (payload.analytics as AnalyticsRecord[]) : [];
-      records.push(...pageRecords);
-
-      const pagination = asRecord(payload.pagination);
-      const hasMore = typeof payload.has_more === "boolean" ? payload.has_more : Boolean(pagination.has_more);
-      const returnedCount = asNumber(payload.count || pagination.count || pageRecords.length);
-      if (!hasMore || returnedCount === 0) break;
-      offset += ANALYTICS_PAGE_LIMIT;
+    if (firstPage.hasMore && firstPage.count > 0) {
+      if (firstPage.total !== null) {
+        const totalPages = Math.min(Math.ceil(firstPage.total / ANALYTICS_PAGE_LIMIT), MAX_ANALYTICS_PAGES);
+        const offsets = Array.from({ length: Math.max(totalPages - 1, 0) }, (_, index) => (index + 1) * ANALYTICS_PAGE_LIMIT);
+        records.push(...await fetchAnalyticsOffsets(fromMs, toMs, offsets));
+      } else {
+        let offset = ANALYTICS_PAGE_LIMIT;
+        for (let page = 1; page < MAX_ANALYTICS_PAGES; page += 1) {
+          const nextPage = await getAnalyticsPage(fromMs, toMs, offset);
+          records.push(...nextPage.records);
+          if (!nextPage.hasMore || nextPage.count === 0) break;
+          offset += ANALYTICS_PAGE_LIMIT;
+        }
+      }
     }
 
     analyticsRangeCache.set(cacheKey, {
@@ -800,19 +848,21 @@ export async function GET(request: NextRequest) {
   try {
     const range = buildRange(request);
     const lookbackMs = ATTEMPT_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
-    const analyticsFetchStartMs = Math.max(0, Math.min(range.previousStartUtcMs, range.startUtcMs) - lookbackMs);
-    const analyticsFetchEndMs = Math.max(range.endUtcMs, range.previousEndUtcMs);
-    const [allRecords, campaigns] = await Promise.all([
-      getAnalyticsRecords(analyticsFetchStartMs, analyticsFetchEndMs),
+    const currentContextStartMs = Math.max(0, range.startUtcMs - lookbackMs);
+    const [currentContextRecords, previousRawRecords, campaigns] = await Promise.all([
+      getAnalyticsRecords(currentContextStartMs, range.endUtcMs),
+      getAnalyticsRecords(range.previousStartUtcMs, range.previousEndUtcMs),
       getCampaigns(),
     ]);
 
-    const enrichedRecords = enrichRecordsWithAttempts(allRecords);
+    const enrichedRecords = enrichRecordsWithAttempts(currentContextRecords);
+    const previousEnrichedRecords = enrichRecordsWithAttempts(previousRawRecords);
     const records = recordsInWindow(enrichedRecords, range.startUtcMs, range.endUtcMs, range);
-    const previousRecords = recordsInWindow(enrichedRecords, range.previousStartUtcMs, range.previousEndUtcMs, range);
+    const previousRecords = recordsInWindow(previousEnrichedRecords, range.previousStartUtcMs, range.previousEndUtcMs, range);
     const current = aggregate(records, campaigns, range);
     const previous = aggregate(previousRecords, [], range);
 
+    const allRecords = dedupeRecords([...currentContextRecords, ...previousRawRecords]);
     const allTimestamps = allRecords.map(getRecordMs).filter((value): value is number => value !== null);
     const response: DashboardData = {
       meta: {
