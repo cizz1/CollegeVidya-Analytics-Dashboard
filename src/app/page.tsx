@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { Activity, BarChart3, Clock3, LineChart, RefreshCw, Target, Workflow } from "lucide-react";
 import Dashboard from "@/components/Dashboard";
@@ -11,6 +11,7 @@ import {
   DatePreset,
   defaultFilters,
   fetchDashboardData,
+  isHistoricalRange,
   peekCachedDashboardData,
 } from "@/utils/fetchData";
 
@@ -31,6 +32,19 @@ const presets: { id: DatePreset; label: string }[] = [
   { id: "custom", label: "Custom" },
 ];
 
+// IANA zone ids — the range math (client + aggregator) is fully DST-aware because
+// every offset is computed per-date via Intl.DateTimeFormat, so America/* zones
+// resolve the correct EST/EDT (etc.) offset for the specific day being queried.
+const timezones: { id: string; label: string }[] = [
+  { id: "Asia/Kolkata", label: "IST" },
+  { id: "UTC", label: "UTC" },
+  { id: "America/New_York", label: "US Eastern" },
+  { id: "America/Chicago", label: "US Central" },
+  { id: "America/Denver", label: "US Mountain" },
+  { id: "America/Los_Angeles", label: "US Pacific" },
+  { id: "Europe/London", label: "UK" },
+];
+
 const todayInTimezone = (timezone: string) => {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,
@@ -47,6 +61,9 @@ export default function Home() {
   const [filters, setFilters] = useState<DashboardFilters>(() => defaultFilters());
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const lastNonceRef = useRef(0);
+  const triggerRefresh = useCallback(() => setRefreshNonce((nonce) => nonce + 1), []);
 
   const effectiveFilters = useMemo(() => {
     if (filters.preset !== "custom") return filters;
@@ -60,13 +77,17 @@ export default function Home() {
 
   useEffect(() => {
     let cancelled = false;
+    // A refresh (manual button, tab re-focus, or the periodic tick) bumps the nonce
+    // and forces a network fetch; a plain filter change reuses the cache.
+    const forceNetwork = refreshNonce !== lastNonceRef.current;
+    lastNonceRef.current = refreshNonce;
     const loadData = async () => {
       // Paint instantly from the last cached snapshot for this window (stale-while-
       // revalidate), so changing filters never blanks the screen. Then revalidate.
       const cached = peekCachedDashboardData(effectiveFilters);
       if (cached && !cancelled) setData(cached);
       setLoading(true);
-      const fetchedData = await fetchDashboardData(effectiveFilters);
+      const fetchedData = await fetchDashboardData(effectiveFilters, { forceNetwork });
       if (!cancelled) {
         setData(fetchedData);
         setLoading(false);
@@ -76,7 +97,24 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [effectiveFilters]);
+  }, [effectiveFilters, refreshNonce]);
+
+  // Live windows (today/yesterday/rolling ranges) keep accruing data during the
+  // day, so auto-refresh them: every 5 minutes and whenever the tab is refocused.
+  // Immutable historical windows are skipped — their data never changes.
+  useEffect(() => {
+    if (isHistoricalRange(effectiveFilters)) return;
+    const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") triggerRefresh();
+    };
+    const interval = window.setInterval(triggerRefresh, REFRESH_INTERVAL_MS);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [effectiveFilters, triggerRefresh]);
 
   const updateFilter = <K extends keyof DashboardFilters>(key: K, value: DashboardFilters[K]) => {
     setFilters((current) => ({ ...current, [key]: value }));
@@ -96,7 +134,7 @@ export default function Home() {
               </div>
               <button
                 suppressHydrationWarning
-                onClick={() => setFilters((current) => ({ ...current }))}
+                onClick={triggerRefresh}
                 className="xl:hidden h-9 w-9 inline-flex items-center justify-center rounded-md border border-card-border bg-card-bg text-muted hover:text-white"
                 title="Refresh"
               >
@@ -182,12 +220,15 @@ export default function Home() {
                 onChange={(event) => updateFilter("timezone", event.target.value)}
                 className="h-9 rounded-md border border-card-border bg-card-bg px-3 text-sm text-foreground outline-none"
               >
-                <option value="Asia/Kolkata">IST</option>
-                <option value="UTC">UTC</option>
+                {timezones.map((tz) => (
+                  <option key={tz.id} value={tz.id}>
+                    {tz.label}
+                  </option>
+                ))}
               </select>
               <button
                 suppressHydrationWarning
-                onClick={() => setFilters((current) => ({ ...current }))}
+                onClick={triggerRefresh}
                 className="hidden h-9 w-9 xl:inline-flex items-center justify-center rounded-md border border-card-border bg-card-bg text-muted hover:text-white"
                 title="Refresh"
               >

@@ -39,16 +39,22 @@ const todayInTimezone = (timezone: string) => {
   return `${get("year")}-${get("month")}-${get("day")}`;
 };
 
-// A window is "historical" (immutable) only when its end is strictly before today.
-// Live presets (today/7d/30d/month) all end today; tomorrow is future. This mirrors
-// the browser-cache classification in utils/fetchData.ts so both layers agree.
+const yesterdayInTimezone = (timezone: string) => {
+  const [year, month, day] = todayInTimezone(timezone).split("-").map(Number);
+  const utc = new Date(Date.UTC(year, month - 1, day - 1));
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${utc.getUTCFullYear()}-${pad(utc.getUTCMonth() + 1)}-${pad(utc.getUTCDate())}`;
+};
+
+// A window is "historical" (immutable → long CDN cache) only when it ends strictly
+// before yesterday. Today and yesterday still accrue late data, so they stay live.
+// Only a past custom range qualifies. Mirrors utils/fetchData.ts so both agree.
 const isHistoricalRequest = (params: URLSearchParams) => {
   const preset = params.get("preset") || "today";
-  const timezone = params.get("timezone") || "Asia/Kolkata";
-  if (preset === "yesterday") return true;
   if (preset !== "custom") return false;
+  const timezone = params.get("timezone") || "Asia/Kolkata";
   const endDate = params.get("endDate") || params.get("startDate") || "";
-  return Boolean(endDate && endDate < todayInTimezone(timezone));
+  return Boolean(endDate && endDate < yesterdayInTimezone(timezone));
 };
 
 const cacheHeaderFor = (historical: boolean) => {

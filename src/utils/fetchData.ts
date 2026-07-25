@@ -251,11 +251,22 @@ const todayInTimezone = (timezone: string) => {
   return `${get("year")}-${get("month")}-${get("day")}`;
 };
 
-const isHistoricalRange = (filters: DashboardFilters) => {
-  if (filters.preset === "yesterday") return true;
+const yesterdayInTimezone = (timezone: string) => {
+  const [year, month, day] = todayInTimezone(timezone).split("-").map(Number);
+  const utc = new Date(Date.UTC(year, month - 1, day - 1));
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${utc.getUTCFullYear()}-${pad(utc.getUTCMonth() + 1)}-${pad(utc.getUTCDate())}`;
+};
+
+// A window is "historical" (immutable → long-lived localStorage cache) ONLY when
+// it ends strictly before yesterday. Today AND yesterday still accrue late data —
+// new calls during the day, plus post-processing that lands hours later — so they
+// are always treated as live and re-fetched. Every non-custom preset except an
+// explicit past custom range ends "now", so only a custom range can be historical.
+export const isHistoricalRange = (filters: DashboardFilters) => {
   if (filters.preset !== "custom") return false;
   const endDate = filters.endDate || filters.startDate;
-  return Boolean(endDate && endDate < todayInTimezone(filters.timezone));
+  return Boolean(endDate && endDate < yesterdayInTimezone(filters.timezone));
 };
 
 const cacheConfigForFilters = (filters: DashboardFilters) => {
@@ -398,13 +409,20 @@ export const peekCachedDashboardData = (filters: DashboardFilters): DashboardDat
   return cached ? normalizeDashboardData(cached) : null;
 };
 
-export const fetchDashboardData = async (filters: DashboardFilters): Promise<DashboardData> => {
+export const fetchDashboardData = async (
+  filters: DashboardFilters,
+  options: { forceNetwork?: boolean } = {}
+): Promise<DashboardData> => {
   const params = buildDashboardParams(filters);
 
   const cacheKey = `${BROWSER_CACHE_PREFIX}${params.toString()}`;
   const { ttlMs, storageName } = cacheConfigForFilters(filters);
-  const cachedData = getCachedDashboardData(cacheKey, ttlMs, storageName);
-  if (cachedData) return normalizeDashboardData(cachedData);
+  // forceNetwork (manual refresh / periodic auto-refresh of live windows) skips the
+  // cache read so we always pull the newest data, but we still write the result back.
+  if (!options.forceNetwork) {
+    const cachedData = getCachedDashboardData(cacheKey, ttlMs, storageName);
+    if (cachedData) return normalizeDashboardData(cachedData);
+  }
 
   try {
     const response = await fetch(`/api/dashboard?${params.toString()}`);
