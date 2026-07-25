@@ -11,6 +11,7 @@ import {
   DatePreset,
   defaultFilters,
   fetchDashboardData,
+  peekCachedDashboardData,
 } from "@/utils/fetchData";
 
 const pages: { id: DashboardPage; label: string; icon: React.ComponentType<{ size?: number }> }[] = [
@@ -60,6 +61,10 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
     const loadData = async () => {
+      // Paint instantly from the last cached snapshot for this window (stale-while-
+      // revalidate), so changing filters never blanks the screen. Then revalidate.
+      const cached = peekCachedDashboardData(effectiveFilters);
+      if (cached && !cancelled) setData(cached);
       setLoading(true);
       const fetchedData = await fetchDashboardData(effectiveFilters);
       if (!cancelled) {

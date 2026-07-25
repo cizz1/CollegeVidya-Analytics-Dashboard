@@ -615,6 +615,17 @@ export default function Dashboard({
           </div>
         </div>
 
+        {data.meta.truncated ? (
+          <div className="flex items-start gap-2 rounded-lg border border-orange/40 bg-orange/10 p-3 text-xs text-orange">
+            <Info size={14} className="mt-0.5 shrink-0" />
+            <span>
+              This window has more calls than can be loaded at once, so the oldest calls are not included and the
+              numbers below are a lower bound. Pick a shorter range (for example a single day or week) to see complete,
+              accurate figures.
+            </span>
+          </div>
+        ) : null}
+
         {activePage === "overview" ? <Overview data={data} /> : null}
         {activePage === "trends" ? <Trends data={data} /> : null}
         {activePage === "timing" ? <Timing data={data} /> : null}

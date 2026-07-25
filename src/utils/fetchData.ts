@@ -83,6 +83,10 @@ export interface DashboardData {
     filteredPeriodStart: string | null;
     filteredPeriodEnd: string | null;
     backendSource: string;
+    // True when the window exceeded the raw-fetch ceiling and some (oldest) calls
+    // could not be loaded — the shown numbers are then a lower bound, not complete.
+    truncated?: boolean;
+    recordsFetched?: number;
   };
   kpis: {
     totalLeadsReceived: number;
@@ -142,7 +146,7 @@ export interface DashboardData {
 }
 
 export const defaultFilters = (): DashboardFilters => ({
-  preset: "30d",
+  preset: "today",
   timezone: "Asia/Kolkata",
   startDate: "",
   endDate: "",
@@ -165,6 +169,8 @@ const emptyData: DashboardData = {
     filteredPeriodStart: null,
     filteredPeriodEnd: null,
     backendSource: "unavailable",
+    truncated: false,
+    recordsFetched: 0,
   },
   kpis: {
     totalLeadsReceived: 0,
@@ -223,7 +229,7 @@ const emptyData: DashboardData = {
   savedLeadsImpact: [],
 };
 
-const DASHBOARD_CACHE_VERSION = "2026-06-25-retry-v2";
+const DASHBOARD_CACHE_VERSION = "2026-07-25-truncation-swr-v4";
 const BROWSER_CACHE_PREFIX = `cv-dashboard:${DASHBOARD_CACHE_VERSION}:`;
 const LIVE_BROWSER_CACHE_TTL_MS = 10 * 60 * 1000;
 const HISTORICAL_BROWSER_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -284,22 +290,46 @@ const getCachedDashboardData = (key: string, ttlMs: number, storageName: "localS
   }
 };
 
+// Drop the oldest cached dashboard blobs (by savedAt) to make room. Only touches
+// keys owned by this dashboard version so we never evict unrelated app storage.
+const evictOldestEntries = (storage: Storage, howMany: number) => {
+  const entries: { key: string; savedAt: number }[] = [];
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (!key || !key.startsWith(BROWSER_CACHE_PREFIX)) continue;
+    let savedAt = 0;
+    try {
+      savedAt = (JSON.parse(storage.getItem(key) || "{}") as CachedDashboardData)?.savedAt || 0;
+    } catch {
+      savedAt = 0;
+    }
+    entries.push({ key, savedAt });
+  }
+  entries
+    .sort((a, b) => a.savedAt - b.savedAt)
+    .slice(0, Math.max(howMany, 1))
+    .forEach((entry) => storage.removeItem(entry.key));
+};
+
 const setCachedDashboardData = (key: string, data: DashboardData, storageName: "localStorage" | "sessionStorage") => {
   if (typeof window === "undefined") return;
 
-  try {
-    const storage = getStorage(storageName);
-    if (!storage) return;
-    storage.setItem(
-      key,
-      JSON.stringify({
-        savedAt: Date.now(),
-        data,
-      } satisfies CachedDashboardData)
-    );
-  } catch {
-    // Storage can fail in private mode or when quota is full; the network path still works.
+  const storage = getStorage(storageName);
+  if (!storage) return;
+
+  const payload = JSON.stringify({ savedAt: Date.now(), data } satisfies CachedDashboardData);
+
+  // Retry a few times: on a quota error, evict the oldest cached windows and try
+  // again so the newest data always wins and stale historical blobs get dropped.
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      storage.setItem(key, payload);
+      return;
+    } catch {
+      evictOldestEntries(storage, 3);
+    }
   }
+  // Storage can also fail in private mode; the network path still works, so give up quietly.
 };
 
 const normalizeDashboardData = (data: Partial<DashboardData>): DashboardData => ({
@@ -343,7 +373,7 @@ const normalizeDashboardData = (data: Partial<DashboardData>): DashboardData => 
   savedLeadsImpact: data.savedLeadsImpact || [],
 });
 
-export const fetchDashboardData = async (filters: DashboardFilters): Promise<DashboardData> => {
+const buildDashboardParams = (filters: DashboardFilters) => {
   const params = new URLSearchParams();
   params.set("preset", filters.preset);
   params.set("schema", DASHBOARD_CACHE_VERSION);
@@ -354,6 +384,22 @@ export const fetchDashboardData = async (filters: DashboardFilters): Promise<Das
     params.set("startDate", filters.startDate);
     params.set("endDate", filters.endDate);
   }
+  return params;
+};
+
+// Instant-paint helper: return the last cached snapshot for these filters ignoring
+// TTL. Lets the UI render immediately from cache while a fresh fetch runs in the
+// background, so switching windows never shows a blank full-screen spinner.
+export const peekCachedDashboardData = (filters: DashboardFilters): DashboardData | null => {
+  if (typeof window === "undefined") return null;
+  const cacheKey = `${BROWSER_CACHE_PREFIX}${buildDashboardParams(filters).toString()}`;
+  const { storageName } = cacheConfigForFilters(filters);
+  const cached = getCachedDashboardData(cacheKey, Number.POSITIVE_INFINITY, storageName);
+  return cached ? normalizeDashboardData(cached) : null;
+};
+
+export const fetchDashboardData = async (filters: DashboardFilters): Promise<DashboardData> => {
+  const params = buildDashboardParams(filters);
 
   const cacheKey = `${BROWSER_CACHE_PREFIX}${params.toString()}`;
   const { ttlMs, storageName } = cacheConfigForFilters(filters);
